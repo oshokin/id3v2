@@ -1,0 +1,36 @@
+# This workflow builds and tests a Go project using GitHub Actions.
+# For more information, see: https://docs.github.com/en/actions/use-cases-and-examples/building-and-testing/building-and-testing-go
+
+name: Build and Test
+
+# Trigger conditions for the workflow
+on:
+  push:
+    branches: ["main"] # Trigger on pushes to the 'main' branch
+    tags:
+      - "v*" # Trigger on tags starting with 'v' (e.g., v1.0.0)
+  pull_request:
+    branches: ["main"] # Trigger on pull requests targeting the 'main' branch
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+
+    steps:
+      # Step 1: Check out the repository code
+      - name: Check out repository
+        uses: actions/checkout@v4 # Standard way to fetch the repository code in GitHub Actions
+
+      # Step 2: Set up the Go environment
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod" # Automatically detect the Go version from go.mod
+
+      # Step 3: Build and test the project
+      - name: Build and test
+        run: |
+          go mod tidy # Ensure dependencies are up to date
+          go build -v ./... # Build the project with verbose output
+          go test -race -v ./... # Run tests with verbose output and race detector

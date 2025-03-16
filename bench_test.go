@@ -1,12 +1,8 @@
-// Copyright 2016 Albert Nigmatzianov. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
-
 package id3v2
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"testing"
 )
 
@@ -14,10 +10,12 @@ var frontCoverPicture = mustReadFile(frontCoverPath)
 
 func BenchmarkParseAllFrames(b *testing.B) {
 	writeTag(b, EncodingUTF8)
+
 	musicContent := mustReadFile(mp3Path)
+
 	b.ResetTimer()
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		tag, err := ParseReader(bytes.NewReader(musicContent), parseOpts)
 		if tag == nil || err != nil {
 			b.Fatal("Error while opening mp3 file:", err)
@@ -27,10 +25,12 @@ func BenchmarkParseAllFrames(b *testing.B) {
 
 func BenchmarkParseAllFramesISO(b *testing.B) {
 	writeTag(b, EncodingISO)
+
 	musicContent := mustReadFile(mp3Path)
+
 	b.ResetTimer()
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		tag, err := ParseReader(bytes.NewReader(musicContent), parseOpts)
 		if tag == nil || err != nil {
 			b.Fatal("Error while opening mp3 file:", err)
@@ -40,11 +40,14 @@ func BenchmarkParseAllFramesISO(b *testing.B) {
 
 func BenchmarkParseArtistAndTitle(b *testing.B) {
 	writeTag(b, EncodingUTF8)
+
 	musicContent := mustReadFile(mp3Path)
+
 	b.ResetTimer()
 
-	for n := 0; n < b.N; n++ {
-		opts := Options{Parse: true, ParseFrames: []string{"Artist", "Title"}}
+	for range b.N {
+		opts := Options{Parse: true, ParseFrames: []string{ArtistFrameDescription, "Title"}}
+
 		tag, err := ParseReader(bytes.NewReader(musicContent), opts)
 		if tag == nil || err != nil {
 			b.Fatal("Error while opening mp3 file:", err)
@@ -53,13 +56,13 @@ func BenchmarkParseArtistAndTitle(b *testing.B) {
 }
 
 func BenchmarkWrite(b *testing.B) {
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		benchWrite(b, EncodingUTF8)
 	}
 }
 
 func BenchmarkWriteISO(b *testing.B) {
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		benchWrite(b, EncodingISO)
 	}
 }
@@ -67,7 +70,8 @@ func BenchmarkWriteISO(b *testing.B) {
 func benchWrite(b *testing.B, encoding Encoding) {
 	tag := NewEmptyTag()
 	setFrames(tag, encoding)
-	if _, err := tag.WriteTo(ioutil.Discard); err != nil {
+
+	if _, err := tag.WriteTo(io.Discard); err != nil {
 		b.Error("Error while writing a tag:", err)
 	}
 }
@@ -88,7 +92,7 @@ func writeTag(b *testing.B, encoding Encoding) {
 
 func setFrames(tag *Tag, encoding Encoding) {
 	tag.SetTitle("Title")
-	tag.SetArtist("Artist")
+	tag.SetArtist(ArtistFrameDescription)
 	tag.SetAlbum("Album")
 	tag.SetYear("2016")
 	tag.SetGenre("Genre")
@@ -104,7 +108,7 @@ func setFrames(tag *Tag, encoding Encoding) {
 
 	uslt := UnsynchronisedLyricsFrame{
 		Encoding:          encoding,
-		Language:          "eng",
+		Language:          EnglishISO6392Code,
 		ContentDescriptor: "Content descriptor",
 		Lyrics:            "bogem/id3v2",
 	}
@@ -112,7 +116,7 @@ func setFrames(tag *Tag, encoding Encoding) {
 
 	comm := CommentFrame{
 		Encoding:    encoding,
-		Language:    "eng",
+		Language:    EnglishISO6392Code,
 		Description: "Short description",
 		Text:        "The actual text",
 	}

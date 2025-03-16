@@ -17,6 +17,7 @@ func TestPopularimeterFrameSmallCounter(t *testing.T) {
 	expectedBodyLength := len(popmFrame.Email) + 1 + 1 + 4
 
 	buf := new(bytes.Buffer)
+
 	written, err := popmFrame.WriteTo(buf)
 	if err != nil {
 		t.Fatalf("Error by writing: %v", err)
@@ -28,6 +29,7 @@ func TestPopularimeterFrameSmallCounter(t *testing.T) {
 
 	expectedCounter := []byte{0, 0, 0, 1}
 	gotCounter := buf.Bytes()[expectedBodyLength-4:]
+
 	if !bytes.Equal(expectedCounter, gotCounter) {
 		t.Fatalf("Expected popularimeter counter: %v, got: %v", expectedCounter, gotCounter)
 	}

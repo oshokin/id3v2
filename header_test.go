@@ -1,11 +1,8 @@
-// Copyright 2016 Albert Nigmatzianov. All rights reserved.
-// Use of this source code is governed by a MIT-style
-// license that can be found in the LICENSE file.
-
 package id3v2
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -25,6 +22,7 @@ func TestParseHeader(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
 	if parsed != th {
 		t.Fatalf("Expected: %v, got: %v", th, parsed)
 	}
@@ -35,12 +33,18 @@ func TestWriteTagHeader(t *testing.T) {
 	t.Parallel()
 
 	buf := new(bytes.Buffer)
-	bw := newBufWriter(buf)
+	bw := newBufferedWriter(buf)
 
-	writeTagHeader(bw, 15351, 4)
-	if err := bw.Flush(); err != nil {
+	err := writeTagHeader(bw, 15351, 4)
+	if err != nil {
 		t.Fatal(err)
 	}
+
+	err = bw.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if !bytes.Equal(thb, buf.Bytes()) {
 		t.Fatalf("Expected %v, got %v", thb, buf.Bytes())
 	}
@@ -52,7 +56,7 @@ func TestSmallTagHeader(t *testing.T) {
 	t.Parallel()
 
 	_, err := parseHeader(bytes.NewReader([]byte{0, 0, 0}))
-	if err != ErrSmallHeaderSize {
+	if !errors.Is(err, ErrSmallHeaderSize) {
 		t.Fatalf("Expected err contains %q, got %q", "less than expected", err)
 	}
 }
@@ -63,7 +67,7 @@ func TestIsNotID3(t *testing.T) {
 	t.Parallel()
 
 	_, err := parseHeader(bytes.NewReader([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0}))
-	if err != errNoTag {
-		t.Fatalf("Expected: %q, got: %q", errNoTag, err)
+	if !errors.Is(err, ErrNoTag) {
+		t.Fatalf("Expected: %q, got: %q", ErrNoTag, err)
 	}
 }

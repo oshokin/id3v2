@@ -2,6 +2,7 @@ package id3v2
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 )
 
@@ -25,6 +26,52 @@ func TestDecodeText(t *testing.T) {
 	}
 }
 
+func TestDecodeTextParallel(t *testing.T) {
+	testCases := []struct {
+		src  []byte
+		from Encoding
+		utf8 string
+	}{
+		{[]byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}, EncodingISO, "Héllö"},
+		{[]byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}, EncodingISO, "Héllö"},
+		{[]byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}, EncodingISO, "Héllö"},
+		{[]byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}, EncodingISO, "Héllö"},
+		{[]byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}, EncodingISO, "Héllö"},
+		{[]byte{0xFF, 0xFE, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}, EncodingUTF16, "Héllö"},
+		{[]byte{0xFF, 0xFE, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}, EncodingUTF16, "Héllö"},
+		{[]byte{0xFF, 0xFE, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}, EncodingUTF16, "Héllö"},
+		{[]byte{0xFF, 0xFE, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}, EncodingUTF16, "Héllö"},
+		{[]byte{0xFF, 0xFE, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}, EncodingUTF16, "Héllö"},
+		{[]byte{0xFF, 0xFE}, EncodingUTF16, ""},
+		{[]byte{0xFF, 0xFE}, EncodingUTF16, ""},
+		{[]byte{0xFF, 0xFE}, EncodingUTF16, ""},
+		{[]byte{0xFF, 0xFE}, EncodingUTF16, ""},
+		{[]byte{0xFF, 0xFE}, EncodingUTF16, ""},
+		{[]byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}, EncodingUTF16BE, "Héllö"},
+		{[]byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}, EncodingUTF16BE, "Héllö"},
+		{[]byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}, EncodingUTF16BE, "Héllö"},
+		{[]byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}, EncodingUTF16BE, "Héllö"},
+		{[]byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}, EncodingUTF16BE, "Héllö"},
+	}
+
+	var wg sync.WaitGroup
+
+	for _, tc := range testCases {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			got := decodeText(tc.src, tc.from)
+			if got != tc.utf8 {
+				t.Errorf("Expected %q from %v encoding, got %q", tc.utf8, tc.from, got)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
 func TestEncodeWriteText(t *testing.T) {
 	testCases := []struct {
 		src      string
@@ -37,34 +84,36 @@ func TestEncodeWriteText(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
-	bw := newBufWriter(buf)
+	bw := newBufferedWriter(buf)
 
 	for _, tc := range testCases {
 		buf.Reset()
 		bw.Reset(buf)
 
 		bw.EncodeAndWriteText(tc.src, tc.to)
+
 		if err := bw.Flush(); err != nil {
 			t.Fatal(err)
 		}
+
 		got := buf.Bytes()
 		if !bytes.Equal(got, tc.expected) {
 			t.Errorf("Expected %q to %q encoding, got %q", tc.expected, tc.to, got)
 		}
+
 		if bw.Written() != len(tc.expected) {
 			t.Errorf("Expected %v size, got %v", len(tc.expected), bw.Written())
 		}
 	}
 }
 
-// See https://github.com/bogem/id3v2/issues/51.
 func TestUnsynchronisedLyricsFrameWithUTF16(t *testing.T) {
 	contentDescriptor := "Content descriptor"
 	lyrics := "Lyrics"
 
 	frame := UnsynchronisedLyricsFrame{
 		Encoding:          EncodingUTF16,
-		Language:          "eng",
+		Language:          EnglishISO6392Code,
 		ContentDescriptor: contentDescriptor,
 		Lyrics:            lyrics,
 	}
@@ -75,7 +124,7 @@ func TestUnsynchronisedLyricsFrameWithUTF16(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parsed, err := parseUnsynchronisedLyricsFrame(newBufReader(buf))
+	parsed, err := parseUnsynchronisedLyricsFrame(newBufferedReader(buf), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,5 +138,4 @@ func TestUnsynchronisedLyricsFrameWithUTF16(t *testing.T) {
 	if uslf.Lyrics != lyrics {
 		t.Errorf("Expected lyrics: %q, got: %q", lyrics, uslf.Lyrics)
 	}
-
 }

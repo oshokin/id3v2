@@ -2,21 +2,19 @@ package id3v2
 
 import (
 	"io"
-	"io/ioutil"
-	"log"
 	"os"
 	"testing"
 	"time"
 )
 
-func prepareTestFile() (*os.File, error) {
-	src, err := os.Open("./testdata/test.mp3")
+func prepareTestFile(pattern string) (*os.File, error) {
+	src, err := os.Open(mp3Path)
 	if err != nil {
 		return nil, err
 	}
 	defer src.Close()
 
-	tmpFile, err := ioutil.TempFile("", "chapter_test")
+	tmpFile, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -25,6 +23,7 @@ func prepareTestFile() (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return tmpFile, nil
 }
 
@@ -38,6 +37,7 @@ func TestAddChapterFrame(t *testing.T) {
 		Title       *TextFrame
 		Description *TextFrame
 	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -111,7 +111,7 @@ func TestAddChapterFrame(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpFile, err := prepareTestFile()
+			tmpFile, err := prepareTestFile("chapter_test")
 			if err != nil {
 				t.Error(err)
 			}
@@ -119,7 +119,7 @@ func TestAddChapterFrame(t *testing.T) {
 
 			tag, err := Open(tmpFile.Name(), Options{Parse: true})
 			if tag == nil || err != nil {
-				log.Fatal("Error while opening mp3 file: ", err)
+				t.Fatal("Error while opening mp3 file: ", err)
 			}
 
 			cf := ChapterFrame{
@@ -133,34 +133,42 @@ func TestAddChapterFrame(t *testing.T) {
 			}
 			tag.AddChapterFrame(cf)
 
-			if err := tag.Save(); err != nil {
+			if err = tag.Save(); err != nil {
 				t.Error(err)
 			}
+
 			tag.Close()
 
 			tag, err = Open(tmpFile.Name(), Options{Parse: true})
 			if tag == nil || err != nil {
-				log.Fatal("Error while opening mp3 file: ", err)
+				t.Fatal("Error while opening mp3 file: ", err)
 			}
-			frame := tag.GetLastFrame("CHAP").(ChapterFrame)
+
+			frame, _ := tag.GetLastFrame("CHAP").(ChapterFrame)
 			if frame.ElementID != tt.fields.ElementID {
 				t.Errorf("Expected element ID: %s, but got %s", tt.fields.ElementID, frame.ElementID)
 			}
+
 			if tt.fields.Title != nil && frame.Title.Text != tt.fields.Title.Text {
 				t.Errorf("Expected title: %s, but got %s", tt.fields.Title.Text, frame.Title)
 			}
+
 			if tt.fields.Description != nil && frame.Description.Text != tt.fields.Description.Text {
 				t.Errorf("Expected description: %s, but got %s", tt.fields.Description.Text, frame.Description.Text)
 			}
+
 			if frame.StartTime != tt.fields.StartTime {
 				t.Errorf("Expected start time: %s, but got %s", tt.fields.StartTime, frame.StartTime)
 			}
+
 			if frame.EndTime != tt.fields.EndTime {
 				t.Errorf("Expected end time: %s, but got %s", tt.fields.EndTime, frame.EndTime)
 			}
+
 			if frame.StartOffset != tt.fields.StartOffset {
 				t.Errorf("Expected start offset: %d, but got %d", tt.fields.StartOffset, frame.StartOffset)
 			}
+
 			if frame.EndOffset != tt.fields.EndOffset {
 				t.Errorf("Expected end offset: %d, but got %d", tt.fields.EndOffset, frame.EndOffset)
 			}
