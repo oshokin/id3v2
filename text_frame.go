@@ -2,6 +2,14 @@ package id3v2
 
 import "io"
 
+func textValues(primary string, multi []string) []string {
+	if len(multi) != 0 {
+		return multi
+	}
+
+	return []string{primary}
+}
+
 // TextFrame is used to work with all text frames in ID3v2 tags.
 // These frames are identified by IDs starting with "T" (e.g., TIT2 for title, TALB for album).
 // It stores text data along with its encoding and supports multiple values for certain frames.
@@ -18,7 +26,21 @@ const textFrameUniqueIdentifier = "ID"
 // Size calculates the total size of the TextFrame in bytes.
 // This includes the encoding byte, the encoded text, and the termination bytes.
 func (tf TextFrame) Size() int {
-	return 1 + encodedSize(tf.Text, tf.Encoding) + len(tf.Encoding.TerminationBytes)
+	return tf.sizeForVersion(4)
+}
+
+func (tf TextFrame) sizeForVersion(version byte) int {
+	values := []string{tf.Text}
+	if version == 4 {
+		values = textValues(tf.Text, tf.Multi)
+	}
+
+	size := 1
+	for _, value := range values {
+		size += encodedSize(value, tf.Encoding) + len(tf.Encoding.TerminationBytes)
+	}
+
+	return size
 }
 
 // UniqueIdentifier returns a unique identifier for the TextFrame.
@@ -31,17 +53,27 @@ func (tf TextFrame) UniqueIdentifier() string {
 // It encodes the text using the specified encoding and writes the frame's data.
 // Returns the number of bytes written and any error encountered.
 func (tf TextFrame) WriteTo(w io.Writer) (int64, error) {
+	return tf.writeToVersion(w, 4)
+}
+
+func (tf TextFrame) writeToVersion(w io.Writer, version byte) (int64, error) {
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(tf.Encoding.Key)
+		bw.writeByte(tf.Encoding.Key)
 
-		// Encode and write the text using the specified encoding.
-		bw.EncodeAndWriteText(tf.Text, tf.Encoding)
+		values := []string{tf.Text}
+		if version == 4 {
+			values = textValues(tf.Text, tf.Multi)
+		}
 
-		// Write the termination bytes for the encoding.
-		_, err := bw.Write(tf.Encoding.TerminationBytes)
-		if err != nil {
-			return err
+		for _, value := range values {
+			// Encode and write the text using the specified encoding.
+			bw.EncodeAndWriteText(value, tf.Encoding)
+
+			// Write the termination bytes for the encoding.
+			if _, err := bw.Write(tf.Encoding.TerminationBytes); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -53,7 +85,7 @@ func (tf TextFrame) WriteTo(w io.Writer) (int64, error) {
 // Returns a TextFrame and any error encountered during parsing.
 func parseTextFrame(br *bufferedReader) (Framer, error) {
 	// Read the encoding byte and determine the encoding type.
-	encoding := getEncoding(br.ReadByte())
+	encoding := getEncoding(br.readByte())
 
 	// Check for errors after reading the encoding byte.
 	if br.Err() != nil {

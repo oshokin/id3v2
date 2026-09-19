@@ -2,9 +2,20 @@ package id3v2
 
 import (
 	"bufio"
+	"encoding/binary"
 	"io"
 	"math"
 )
+
+func readUint32BE(r io.Reader) (uint32, error) {
+	var buf [4]byte
+
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, err
+	}
+
+	return binary.BigEndian.Uint32(buf[:]), nil
+}
 
 // truncateIntToUint converts an int to a uint, ensuring it doesn't overflow.
 // If the input value is negative, it returns 0 to prevent invalid uint values.
@@ -42,7 +53,7 @@ func truncateInt64ToUint32(value int64) uint32 {
 		return math.MaxUint32
 	}
 
-	return uint32(value) //nolint:gosec // The value is already validated above.
+	return uint32(value)
 }
 
 // truncateUintToInt64 safely truncates a uint to a 64-bit signed integer.

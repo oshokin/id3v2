@@ -5,17 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"code.cloudfoundry.org/bytefmt"
 )
 
 const (
-	frameHeaderSize   = 10                    // Size of an ID3v2 frame header in bytes.
-	defaultBufferSize = 32 * bytefmt.KILOBYTE // Default size of a byte buffer.
+	frameHeaderSize   = 10       // Size of an ID3v2 frame header in bytes.
+	defaultBufferSize = 32 << 10 // Default size of a byte buffer.
 )
 
 var (
-	// ErrUnsupportedVersion is returned when the ID3v2 tag version is less than 3.
+	// ErrUnsupportedVersion is returned for ID3v2 versions other than 2.3 and 2.4.
 	ErrUnsupportedVersion = errors.New("unsupported version of ID3 tag")
 
 	// ErrBodyOverflow is returned when a frame's size exceeds the remaining space in the tag.
@@ -52,7 +50,7 @@ func (tag *Tag) parse(rd io.Reader, opts Options) error {
 	}
 
 	// Only ID3v2.3 and ID3v2.4 are supported.
-	if header.Version < 3 {
+	if header.Version != 3 && header.Version != 4 {
 		return ErrUnsupportedVersion
 	}
 
@@ -116,9 +114,11 @@ func (tag *Tag) parseFrames(opts Options) error {
 			return ErrBodyOverflow // Frame exceeds the remaining tag size.
 		}
 
-		// Create a limited reader for the frame's body.
-		bodyReader := getLimitedReader(tag.reader, bodySize)
-		defer putLimitedReader(bodyReader)
+		// Limit reads to the declared frame body so the next header stays aligned.
+		bodyReader := &io.LimitedReader{
+			R: tag.reader,
+			N: bodySize,
+		}
 
 		// Skip frames that are not in the list of frames to parse.
 		if isParseFramesProvided && !parseableIDs[id] {
@@ -136,6 +136,12 @@ func (tag *Tag) parseFrames(opts Options) error {
 		frame, err := parseFrameBody(id, br, tag.version)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
+		}
+
+		if bodyReader.N > 0 {
+			if _, copyErr := io.Copy(io.Discard, bodyReader); copyErr != nil {
+				return copyErr
+			}
 		}
 
 		// Add the parsed frame to the tag.
@@ -181,7 +187,15 @@ func parseFrameHeader(buf []byte, rd io.Reader, synchSafe bool) (frameHeader, er
 
 	// Read the frame header into the buffer.
 	fhBuf := buf[:frameHeaderSize]
-	if _, err := rd.Read(fhBuf); err != nil {
+
+	n, err := io.ReadFull(rd, fhBuf)
+	switch {
+	case err == nil:
+	case errors.Is(err, io.EOF) && n == 0:
+		return header, io.EOF
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return header, fmt.Errorf("truncated frame header: %w", err)
+	default:
 		return header, err
 	}
 
@@ -206,18 +220,8 @@ func parseFrameHeader(buf []byte, rd io.Reader, synchSafe bool) (frameHeader, er
 
 // skipReaderBuf reads and discards data from the reader until EOF.
 func skipReaderBuf(rd io.Reader, buf []byte) error {
-	for {
-		_, err := rd.Read(buf)
-		if err == io.EOF {
-			break
-		}
-
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	_, err := io.CopyBuffer(io.Discard, rd, buf)
+	return err
 }
 
 // parseFrameBody parses the body of a frame based on its ID.

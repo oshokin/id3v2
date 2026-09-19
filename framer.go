@@ -27,3 +27,27 @@ type Framer interface {
 	// It returns the number of bytes written and any error encountered during the write operation.
 	WriteTo(w io.Writer) (n int64, err error)
 }
+
+// versionedFramer is an optional private interface for frames whose
+// serialized form depends on the parent ID3v2 version. Public Framer
+// methods stay version-agnostic (they use ID3v2.4) so the v2 API is unchanged.
+type versionedFramer interface {
+	sizeForVersion(version byte) int
+	writeToVersion(w io.Writer, version byte) (int64, error)
+}
+
+func frameSizeForVersion(frame Framer, version byte) int {
+	if vf, ok := frame.(versionedFramer); ok {
+		return vf.sizeForVersion(version)
+	}
+
+	return frame.Size()
+}
+
+func writeFrameBody(w io.Writer, frame Framer, version byte) (int64, error) {
+	if vf, ok := frame.(versionedFramer); ok {
+		return vf.writeToVersion(w, version)
+	}
+
+	return frame.WriteTo(w)
+}

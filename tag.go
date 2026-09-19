@@ -2,16 +2,16 @@ package id3v2
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-
-	"code.cloudfoundry.org/bytefmt"
+	"slices"
 )
 
 // defaultSaveBufferSize defines the size of the buffer used during file operations, such as saving or copying.
 // It is set to 128 KB, which is a reasonable size for balancing memory usage and I/O performance.
-const defaultSaveBufferSize = 128 * bytefmt.KILOBYTE
+const defaultSaveBufferSize = 128 << 10
 
 // ErrNoFile is returned when a tag operation is attempted on a tag that wasn't initialized with a file.
 // For example, if you try to save or close a tag that was created without a file.
@@ -124,7 +124,7 @@ func (tag *Tag) AllFrames() map[string][]Framer {
 	}
 
 	for id, sequence := range tag.sequences {
-		frames[id] = sequence.Frames()
+		frames[id] = slices.Clone(sequence.frames)
 	}
 
 	return frames
@@ -133,16 +133,20 @@ func (tag *Tag) AllFrames() map[string][]Framer {
 // DeleteAllFrames removes all frames from the tag.
 // This is useful for starting fresh when creating a new tag.
 func (tag *Tag) DeleteAllFrames() {
-	if tag.frames == nil || len(tag.frames) > 0 {
+	if tag.frames == nil {
 		tag.frames = make(map[string]Framer)
+	} else {
+		clear(tag.frames)
 	}
 
-	if tag.sequences == nil || len(tag.sequences) > 0 {
-		for _, s := range tag.sequences {
-			putSequence(s)
-		}
-
+	if tag.sequences == nil {
 		tag.sequences = make(map[string]*sequence)
+		return
+	}
+
+	for id, seq := range tag.sequences {
+		putSequence(seq)
+		delete(tag.sequences, id)
 	}
 }
 
@@ -169,11 +173,14 @@ func (tag *Tag) Reset(rd io.Reader, opts Options) error {
 func (tag *Tag) GetFrames(id string) []Framer {
 	if f, exists := tag.frames[id]; exists {
 		return []Framer{f}
-	} else if s, exists := tag.sequences[id]; exists { //nolint:govet // Shadowing is intentional here.
-		return s.Frames()
 	}
 
-	return nil
+	seq := tag.sequences[id]
+	if seq == nil {
+		return nil
+	}
+
+	return slices.Clone(seq.frames)
 }
 
 // GetLastFrame returns the last frame from the slice returned by GetFrames.
@@ -200,7 +207,10 @@ func (tag *Tag) GetTextFrame(id string) TextFrame {
 		return TextFrame{}
 	}
 
-	tf, _ := f.(TextFrame)
+	tf, ok := f.(TextFrame)
+	if !ok {
+		return TextFrame{}
+	}
 
 	return tf
 }
@@ -302,7 +312,7 @@ func (tag *Tag) iterateOverAllFrames(f func(id string, frame Framer) error) erro
 	}
 
 	for id, sequence := range tag.sequences {
-		for _, frame := range sequence.Frames() {
+		for _, frame := range sequence.frames {
 			if err := f(id, frame); err != nil {
 				return err
 			}
@@ -318,19 +328,19 @@ func (tag *Tag) Size() int {
 		return 0
 	}
 
-	var n int
-	n += tagHeaderSize // Add the size of the tag header.
+	size := tagHeaderSize
 
-	err := tag.iterateOverAllFrames(func(_ string, f Framer) error {
-		n += frameHeaderSize + f.Size() // Add the size of each frame.
-
-		return nil
-	})
-	if err != nil {
-		panic(err)
+	for _, frame := range tag.frames {
+		size += frameHeaderSize + frameSizeForVersion(frame, tag.version)
 	}
 
-	return n
+	for _, seq := range tag.sequences {
+		for _, frame := range seq.frames {
+			size += frameHeaderSize + frameSizeForVersion(frame, tag.version)
+		}
+	}
+
+	return size
 }
 
 // Version returns the ID3v2 version of the tag (e.g., 3 or 4).
@@ -353,71 +363,99 @@ func (tag *Tag) SetVersion(version byte) {
 // If there are no frames, it writes only the music part without any ID3v2 information.
 // Returns ErrNoFile if the tag wasn't initialized with a file.
 func (tag *Tag) Save() error {
-	file, ok := tag.reader.(*os.File)
+	originalFile, ok := tag.reader.(*os.File)
 	if !ok {
 		return ErrNoFile
 	}
 
 	// Get the original file's mode (permissions).
-	originalFile := file
-
 	originalStat, err := originalFile.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("stat original file: %w", err)
 	}
 
-	// Create a temporary file to write the new tag.
-	name := file.Name() + "-id3v2"
+	originalName := originalFile.Name()
 
-	newFile, err := os.OpenFile(filepath.Clean(name), os.O_RDWR|os.O_CREATE, originalStat.Mode())
+	// Create a unique temporary file in the same directory so rename stays atomic.
+	tmp, err := os.CreateTemp(
+		filepath.Dir(originalName),
+		"."+filepath.Base(originalName)+".id3v2-*",
+	)
 	if err != nil {
-		return err
+		return fmt.Errorf("create temporary file: %w", err)
 	}
 
-	// Ensure the temporary file is cleaned up if something goes wrong.
-	tempfileShouldBeRemoved := true
+	tmpName := tmp.Name()
+	tmpClosed := false
+	renamed := false
+
 	defer func() {
-		if tempfileShouldBeRemoved {
-			os.Remove(newFile.Name())
+		if !tmpClosed {
+			_ = tmp.Close()
+		}
+
+		if !renamed {
+			_ = os.Remove(tmpName)
 		}
 	}()
 
+	if err = tmp.Chmod(originalStat.Mode()); err != nil {
+		return fmt.Errorf("preserve file mode: %w", err)
+	}
+
 	// Write the tag to the temporary file.
-	tagSize, err := tag.WriteTo(newFile)
+	tagSize, err := tag.WriteTo(tmp)
 	if err != nil {
-		return err
+		return fmt.Errorf("write ID3v2 tag: %w", err)
 	}
 
 	// Seek to the music part of the original file.
 	if _, err = originalFile.Seek(tag.originalSize, io.SeekStart); err != nil {
-		return err
+		return fmt.Errorf("seek to audio payload: %w", err)
 	}
 
 	// Copy the music part to the temporary file.
 	buf := getByteSlice(defaultSaveBufferSize)
 	defer putByteSlice(buf)
 
-	if _, err = io.CopyBuffer(newFile, originalFile, buf); err != nil {
-		return err
+	if _, err = io.CopyBuffer(tmp, originalFile, buf); err != nil {
+		return fmt.Errorf("copy audio payload: %w", err)
 	}
 
-	// Close the files to allow replacing.
-	newFile.Close()
-	originalFile.Close()
+	if err = tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary file: %w", err)
+	}
+
+	tmpClosed = true
+
+	// Close the original file so it can be replaced.
+	if err = originalFile.Close(); err != nil {
+		return fmt.Errorf("close original file: %w", err)
+	}
 
 	// Replace the original file with the temporary file.
-	if err = os.Rename(newFile.Name(), originalFile.Name()); err != nil {
-		return err
+	if err = replaceFile(tmpName, originalName); err != nil {
+		reopened, reopenErr := os.Open(originalName)
+		if reopenErr == nil {
+			tag.reader = reopened
+		}
+
+		return errors.Join(
+			fmt.Errorf("replace original file: %w", err),
+			reopenErr,
+		)
 	}
 
-	tempfileShouldBeRemoved = false
+	renamed = true
 
 	// Update the tag's reader to the new file.
-	tag.reader, err = os.Open(originalFile.Name())
+	reopened, err := os.Open(originalName)
 	if err != nil {
-		return err
+		tag.reader = nil
+		return fmt.Errorf("reopen saved file: %w", err)
 	}
 
+	tag.reader = reopened
 	// Update the tag's original size.
 	tag.originalSize = tagSize
 
@@ -450,10 +488,8 @@ func (tag *Tag) WriteTo(w io.Writer) (n int64, err error) {
 	}
 
 	// Write all frames.
-	synchSafe := tag.Version() == 4
-
 	err = tag.iterateOverAllFrames(func(id string, f Framer) error {
-		return writeFrame(bw, id, f, synchSafe)
+		return writeFrame(bw, id, f, tag.version)
 	})
 	if err != nil {
 		_ = bw.Flush()
@@ -471,22 +507,27 @@ func writeTagHeader(bw *bufferedWriter, framesSize uint, version byte) error {
 		return err
 	}
 
-	bw.WriteByte(version)
-	bw.WriteByte(0) // Revision
-	bw.WriteByte(0) // Flags
+	bw.writeByte(version)
+	bw.writeByte(0) // Revision
+	bw.writeByte(0) // Flags
 	bw.WriteBytesSize(framesSize, true)
 
 	return nil
 }
 
 // writeFrame writes a single frame to the provided bufferedWriter.
-func writeFrame(bw *bufferedWriter, id string, frame Framer, synchSafe bool) error {
-	err := writeFrameHeader(bw, id, truncateIntToUint(frame.Size()), synchSafe)
-	if err != nil {
+func writeFrame(bw *bufferedWriter, id string, frame Framer, version byte) error {
+	return writeEmbeddedFrame(bw, id, frame, version)
+}
+
+func writeEmbeddedFrame(bw *bufferedWriter, id string, frame Framer, version byte) error {
+	bodySize := frameSizeForVersion(frame, version)
+
+	if err := writeFrameHeader(bw, id, truncateIntToUint(bodySize), version == 4); err != nil {
 		return err
 	}
 
-	_, err = frame.WriteTo(bw)
+	_, err := writeFrameBody(bw, frame, version)
 
 	return err
 }

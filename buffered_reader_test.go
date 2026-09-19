@@ -64,12 +64,13 @@ func TestReadTextUTF16WithLeadingEmptyString(t *testing.T) {
 
 	sampleTextPrefix := append(slices.Clone(bom), EncodingUTF16.TerminationBytes...)
 
-	utf16C := []byte{0x43, 0x00} // "C" char in UTF-16.
-	sampleTextSuffix := append(slices.Clone(bom), append(utf16C, EncodingUTF16.TerminationBytes...)...)
+	utf16C := make([]byte, 0, 2+len(EncodingUTF16.TerminationBytes))
+	utf16C = append(utf16C, 0x43, 0x00) // "C" char in UTF-16.
+	utf16C = append(utf16C, EncodingUTF16.TerminationBytes...)
+	sampleTextSuffix := append(slices.Clone(bom), utf16C...)
+	sampleTextPrefix = append(sampleTextPrefix, sampleTextSuffix...)
 
-	sampleText := append(sampleTextPrefix, sampleTextSuffix...)
-
-	bufReader := newBufferedReader(bytes.NewReader(sampleText))
+	bufReader := newBufferedReader(bytes.NewReader(sampleTextPrefix))
 
 	text := decodeText(bufReader.ReadText(EncodingUTF16), EncodingUTF16)
 	if text != "" {
@@ -127,6 +128,45 @@ func TestReadTillDelimEOF(t *testing.T) {
 	_, err := bufReader.readTillDelimiter(234)
 	if !errors.Is(err, io.EOF) {
 		t.Errorf("Expected io.EOF, got %v", err)
+	}
+}
+
+func TestBufferedReaderReadAndReadByte(t *testing.T) {
+	t.Parallel()
+
+	br := newBufferedReader(bytes.NewReader(bs))
+
+	got := make([]byte, 3)
+
+	n, err := br.Read(got)
+	if err != nil || n != 3 || !bytes.Equal(got, bs[:3]) {
+		t.Fatalf("Read = %d %v %v", n, err, got)
+	}
+
+	if b := br.readByte(); b != bs[3] || br.Err() != nil {
+		t.Fatalf("ReadByte = %d err %v", b, br.Err())
+	}
+}
+
+func TestBufferedReaderNextTruncated(t *testing.T) {
+	t.Parallel()
+
+	br := newBufferedReader(bytes.NewReader([]byte{1, 2}))
+
+	got := br.Next(4)
+	if br.Err() == nil {
+		t.Fatalf("Next on short input succeeded: %v", got)
+	}
+}
+
+func TestBufferedReaderReadTextTruncatedDelimiter(t *testing.T) {
+	t.Parallel()
+
+	br := newBufferedReader(bytes.NewReader([]byte{'A', 'B'}))
+
+	_ = br.ReadText(EncodingISO)
+	if br.Err() == nil {
+		t.Fatal("expected error for missing terminator")
 	}
 }
 

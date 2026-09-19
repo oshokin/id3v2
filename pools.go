@@ -6,36 +6,43 @@ import (
 	"sync"
 )
 
-// bsPool is a pool of byte slices used to reduce allocations and improve performance.
-// It stores reusable byte slices to avoid repeatedly allocating and freeing memory.
+// bsPool stores *[]byte. SA6002: a slice value in sync.Pool boxes the
+// pointer/len/cap header on every Put; a pointer to the slice does not.
+// See BenchmarkByteSlicePool32K and BenchmarkByteSlicePool128K in pools_test.go.
 var bsPool = sync.Pool{
-	New: func() any { return nil }, // If the pool is empty, return nil.
+	New: func() any {
+		b := make([]byte, 0)
+		return &b
+	},
 }
 
 // getByteSlice returns a byte slice of the specified size.
 // It first tries to reuse a slice from the pool. If none is available, it allocates a new one.
 func getByteSlice(size int) []byte {
-	fromPool := bsPool.Get()
+	fromPool, _ := bsPool.Get().(*[]byte)
 	if fromPool == nil {
-		return make([]byte, size) // Allocate a new slice if the pool is empty.
+		return make([]byte, size)
 	}
 
-	bs, _ := fromPool.([]byte)
+	bs := *fromPool
 	if cap(bs) < size {
-		bs = make([]byte, size) // Allocate a new slice if the pooled slice is too small.
+		return make([]byte, size)
 	}
 
-	return bs[0:size] // Return a slice of the requested size.
+	return bs[0:size]
 }
 
 // putByteSlice returns a byte slice to the pool for reuse.
-// This helps reduce memory allocations by recycling slices.
 func putByteSlice(b []byte) {
-	//nolint:staticcheck // slice is already a pointer
-	bsPool.Put(b) // Add the slice back to the pool.
+	if cap(b) == 0 {
+		return
+	}
+
+	bsPool.Put(&b)
 }
 
-// bwPool is a pool of buffered writers used to reduce allocations.
+// bwPool reuses the internal bufio.Writer buffer.
+// See BenchmarkBufferedWriterPool in pools_test.go.
 var bwPool = sync.Pool{
 	New: func() any { return newBufferedWriter(nil) }, // Create a new bufferedWriter if the pool is empty.
 }
@@ -50,31 +57,12 @@ func getBufWriter(w io.Writer) *bufferedWriter {
 
 // putBufWriter returns a buffered writer to the pool for reuse.
 func putBufWriter(bw *bufferedWriter) {
-	bwPool.Put(bw) // Add the writer back to the pool.
+	bw.Reset(nil)
+	bwPool.Put(bw)
 }
 
-// lrPool is a pool of io.LimitedReader instances used to reduce allocations.
-var lrPool = sync.Pool{
-	New: func() any { return new(io.LimitedReader) }, // Create a new LimitedReader if the pool is empty.
-}
-
-// getLimitedReader retrieves a LimitedReader from the pool and initializes it with the given reader and limit.
-func getLimitedReader(rd io.Reader, n int64) *io.LimitedReader {
-	r, _ := lrPool.Get().(*io.LimitedReader)
-	r.R = rd // Set the underlying reader.
-	r.N = n  // Set the read limit.
-
-	return r
-}
-
-// putLimitedReader returns a LimitedReader to the pool for reuse.
-func putLimitedReader(r *io.LimitedReader) {
-	r.N = 0       // Reset the read limit.
-	r.R = nil     // Clear the underlying reader.
-	lrPool.Put(r) // Add the reader back to the pool.
-}
-
-// rdPool is a pool of buffered readers used to reduce allocations.
+// rdPool reuses the internal bufio.Reader buffer.
+// See BenchmarkBufferedReaderPool in pools_test.go.
 var rdPool = sync.Pool{
 	New: func() any { return newBufferedReader(nil) }, // Create a new bufferedReader if the pool is empty.
 }
@@ -89,10 +77,12 @@ func getBufReader(rd io.Reader) *bufferedReader {
 
 // putBufReader returns a buffered reader to the pool for reuse.
 func putBufReader(rd *bufferedReader) {
-	rdPool.Put(rd) // Add the reader back to the pool.
+	rd.Reset(nil)
+	rdPool.Put(rd)
 }
 
-// bbPool is a pool of bytes.Buffer instances used to reduce allocations.
+// bbPool reuses bytes.Buffer instances.
+// See BenchmarkBytesBufferPool in pools_test.go.
 var bbPool = sync.Pool{
 	New: func() any { return new(bytes.Buffer) }, // Create a new bytes.Buffer if the pool is empty.
 }

@@ -9,13 +9,11 @@ import (
 var frontCoverPicture = mustReadFile(frontCoverPath)
 
 func BenchmarkParseAllFrames(b *testing.B) {
-	writeTag(b, EncodingUTF8)
-
-	musicContent := mustReadFile(mp3Path)
+	musicContent := mustReadFile(writeTag(b, EncodingUTF8))
 
 	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		tag, err := ParseReader(bytes.NewReader(musicContent), parseOpts)
 		if tag == nil || err != nil {
 			b.Fatal("Error while opening mp3 file:", err)
@@ -24,13 +22,10 @@ func BenchmarkParseAllFrames(b *testing.B) {
 }
 
 func BenchmarkParseAllFramesISO(b *testing.B) {
-	writeTag(b, EncodingISO)
-
-	musicContent := mustReadFile(mp3Path)
-
+	musicContent := mustReadFile(writeTag(b, EncodingISO))
 	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		tag, err := ParseReader(bytes.NewReader(musicContent), parseOpts)
 		if tag == nil || err != nil {
 			b.Fatal("Error while opening mp3 file:", err)
@@ -39,13 +34,11 @@ func BenchmarkParseAllFramesISO(b *testing.B) {
 }
 
 func BenchmarkParseArtistAndTitle(b *testing.B) {
-	writeTag(b, EncodingUTF8)
-
-	musicContent := mustReadFile(mp3Path)
+	musicContent := mustReadFile(writeTag(b, EncodingUTF8))
 
 	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		opts := Options{Parse: true, ParseFrames: []string{ArtistFrameDescription, "Title"}}
 
 		tag, err := ParseReader(bytes.NewReader(musicContent), opts)
@@ -56,14 +49,52 @@ func BenchmarkParseArtistAndTitle(b *testing.B) {
 }
 
 func BenchmarkWrite(b *testing.B) {
-	for range b.N {
+	for b.Loop() {
 		benchWrite(b, EncodingUTF8)
 	}
 }
 
 func BenchmarkWriteISO(b *testing.B) {
-	for range b.N {
+	for b.Loop() {
 		benchWrite(b, EncodingISO)
+	}
+}
+
+func BenchmarkParseTag(b *testing.B) {
+	content := mustReadFile(writeTag(b, EncodingUTF8))
+	b.ResetTimer()
+
+	for b.Loop() {
+		tag, err := ParseReader(bytes.NewReader(content), parseOpts)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = tag.Close()
+	}
+}
+
+func BenchmarkWriteTag(b *testing.B) {
+	for b.Loop() {
+		benchWrite(b, EncodingUTF8)
+	}
+}
+
+func BenchmarkParseAndWriteTag(b *testing.B) {
+	content := mustReadFile(writeTag(b, EncodingUTF8))
+	b.ResetTimer()
+
+	for b.Loop() {
+		tag, err := ParseReader(bytes.NewReader(content), parseOpts)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if _, err := tag.WriteTo(io.Discard); err != nil {
+			b.Fatal(err)
+		}
+
+		_ = tag.Close()
 	}
 }
 
@@ -76,8 +107,10 @@ func benchWrite(b *testing.B, encoding Encoding) {
 	}
 }
 
-func writeTag(b *testing.B, encoding Encoding) {
-	tag, err := Open(mp3Path, Options{Parse: false})
+func writeTag(b *testing.B, encoding Encoding) string {
+	path := copyFixture(b)
+
+	tag, err := Open(path, Options{Parse: false})
 	if tag == nil || err != nil {
 		b.Fatal("Error while opening mp3 file:", err)
 	}
@@ -86,8 +119,10 @@ func writeTag(b *testing.B, encoding Encoding) {
 	setFrames(tag, encoding)
 
 	if err = tag.Save(); err != nil {
-		b.Error("Error while saving a tag:", err)
+		b.Fatal("Error while saving a tag:", err)
 	}
+
+	return path
 }
 
 func setFrames(tag *Tag, encoding Encoding) {

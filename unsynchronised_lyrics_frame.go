@@ -48,7 +48,7 @@ func (uslf UnsynchronisedLyricsFrame) WriteTo(w io.Writer) (n int64, err error) 
 	// Use a buffered writer for efficient writing.
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(uslf.Encoding.Key)
+		bw.writeByte(uslf.Encoding.Key)
 
 		// Write the 3-character language code.
 		bw.WriteString(uslf.Language)
@@ -74,7 +74,7 @@ func (uslf UnsynchronisedLyricsFrame) WriteTo(w io.Writer) (n int64, err error) 
 // If any error occurs during reading, it returns the error.
 func parseUnsynchronisedLyricsFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the encoding byte and resolve the encoding type.
-	encoding := getEncoding(br.ReadByte())
+	encoding := getEncoding(br.readByte())
 
 	// Read the 3-character language code.
 	language := br.Next(3)

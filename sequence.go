@@ -14,6 +14,14 @@ type sequence struct {
 // AddFrame adds a frame to the sequence. If a frame with the same unique identifier already exists,
 // it replaces the existing frame. Otherwise, it appends the new frame to the sequence.
 func (s *sequence) AddFrame(f Framer) {
+	// Unknown frames have a random UniqueIdentifier(), so they must not replace each other.
+	switch f.(type) {
+	case UnknownFrame, *UnknownFrame:
+		s.frames = append(s.frames, f)
+
+		return
+	}
+
 	i := indexOfFrame(f, s.frames) // Find the index of the frame with the same unique identifier.
 
 	if i == -1 {
@@ -48,25 +56,23 @@ func (s *sequence) Frames() []Framer {
 	return s.frames
 }
 
-// seqPool is a sync.Pool used to reuse sequence objects to reduce memory allocations.
-// This improves performance by avoiding frequent creation and garbage collection of sequence objects.
+// seqPool reuses sequence objects. See BenchmarkSequencePool in pools_test.go.
 var seqPool = sync.Pool{New: func() any {
 	return &sequence{frames: []Framer{}} // Create a new sequence with an empty slice of frames.
 }}
 
 // getSequence retrieves a sequence object from the pool or creates a new one if the pool is empty.
-// If the retrieved sequence has existing frames, it resets the frames slice to ensure a clean state.
 func getSequence() *sequence {
-	s, _ := seqPool.Get().(*sequence) // Retrieve a sequence from the pool.
-	if s.Count() > 0 {
-		s.frames = []Framer{} // Reset the frames slice if it contains any frames.
-	}
+	s, _ := seqPool.Get().(*sequence)
 
 	return s
 }
 
 // putSequence returns a sequence object to the pool for reuse.
-// This helps reduce memory allocations by reusing sequence objects instead of discarding them.
+// The whole backing array is cleared so pooled sequences do not keep Framer references alive.
 func putSequence(s *sequence) {
-	seqPool.Put(s) // Return the sequence to the pool.
+	clear(s.frames[:cap(s.frames)])
+	s.frames = s.frames[:0]
+
+	seqPool.Put(s)
 }

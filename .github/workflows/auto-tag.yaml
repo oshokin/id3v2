@@ -1,0 +1,62 @@
+# Create a SemVer tag after CI succeeds on the default branch.
+# Commit prefixes: major: -> MAJOR, feat: -> MINOR, fix: or anything else -> PATCH.
+
+name: Auto Tag
+
+on:
+  workflow_run:
+    workflows: ["CI"] # Listen for the main CI workflow.
+    types:
+      - completed
+
+# The workflow pushes tags, so it needs write access to the repository.
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    concurrency:
+      group: auto-tag-${{ github.event.workflow_run.head_sha || github.run_id }}
+      cancel-in-progress: false
+    # Run only after a successful push to the default branch.
+    # workflow_run has head_branch, not ref.
+    if: ${{ github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the full history so tags and commits are available.
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }} # Tag the commit that passed CI.
+
+      # Step 2: Refresh tags before computing the next version.
+      - name: Fetch tags
+        run: git fetch --tags --prune --force
+
+      # Step 3: Decide whether a new tag is needed and which one.
+      - name: Determine next version
+        id: semver
+        shell: bash
+        run: |
+          chmod +x scripts/semver_next.sh
+          scripts/semver_next.sh --emit-gh-output
+
+      # Step 4: Create and push the tag when the script requests a release.
+      - name: Create and push tag
+        if: steps.semver.outputs.has_release == '1'
+        env:
+          NEXT_TAG: ${{ steps.semver.outputs.next_tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${NEXT_TAG}" >/dev/null; then
+            echo "Tag ${NEXT_TAG} already exists, skipping push."
+            exit 0
+          fi
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          echo "Creating new tag ${NEXT_TAG}"
+          git tag -a "${NEXT_TAG}" -m "chore: release ${NEXT_TAG}"
+          git push origin "${NEXT_TAG}"

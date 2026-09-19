@@ -1,68 +1,133 @@
-# More info on config here: https://golangci-lint.run/usage/configuration/#config-file
-#
-run:
-  timeout: 10m
-  issues-exit-code: 1
-  tests: true
-
-output:
-  formats:
-    - format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-
-linters-settings:
-  dupl:
-    threshold: 100
-  goconst:
-    min-len: 2
-    min-occurrences: 2
+# Defines the configuration version.
+# The only possible value is "2".
+version: "2"
 
 linters:
-  disable-all: true
+  # Default set of linters.
+  # The value can be:
+  # - `standard`: the "Default" linters https://golangci-lint.run/docs/linters/#all-linters
+  # - `all`: enables all linters by default.
+  # - `none`: disables all linters by default.
+  # - `fast`: enables only linters considered as "fast" (`golangci-lint help linters --json | jq '[ .[] | select(.fast==true) ] | map(.name)'`).
+  # Default: standard
+  # Enable every available linter, then turn off the ones that only add noise here.
+  default: all
+
+  # Disable specific linters.
+  disable:
+    - cyclop # Parse, Save and frame writers are inherently branching ID3 state machines.
+    - depguard # The default deny list blocks golang.org/x/text, which this library needs.
+    - dupl # Frame parsers and tests share the same ID3 layouts on purpose.
+    - err113 # The public error API uses errors.New and fmt.Errorf.
+    - exhaustruct # Deprecated; optional ID3 fields are left at their zero values.
+    - exhaustruct_v5 # Optional ID3 fields are left at their zero values.
+    - forcetypeassert # Framer type assertions are the public frame model.
+    - funcorder # Declaration order is not part of this package style.
+    - funlen # Parse, Save and fixture tests are long because the ID3 layout is long.
+    - gochecknoglobals # Encodings, parsers and buffer pools are package state.
+    - gocognit # Parse and Save complexity comes from the ID3 spec, not accidental nesting.
+    - goconst # Repeated frame IDs and encodings are clearer than extra constants.
+    - gomodguard # Deprecated; replaced by gomodguard_v2.
+    - ireturn # The public API returns the Framer interface.
+    - lll # Line length is enforced and fixed by the golines formatter.
+    - mnd # Header sizes, encodings and other numbers come from the ID3 spec.
+    - nlreturn # Newlines before return are not part of this package style.
+    - noinlineerr # Inline error returns are the local style.
+    - nonamedreturns # Existing named results document sizes and write counts.
+    - paralleltest # Tests stay sequential; many share fixtures and file state.
+    - testableexamples # Examples are documentation, not runnable tests.
+    - testpackage # Whitebox tests stay in package id3v2.
+    - thelper # Test helper style is not enforced here.
+    - tparallel # Tests stay sequential; many share fixtures and file state.
+    - varnamelen # Short names such as br, id and rd are the local style.
+    - wrapcheck # Wrapping every stdlib error would change the public error values.
+    - wsl # Deprecated; replaced by wsl_v2.
+
+  # All available settings of specific linters.
+  settings:
+    gosec:
+      # Open/Save take caller-supplied paths.
+      # UniqueIdentifier only needs uniqueness, not secrecy.
+      # To specify a set of rules to explicitly exclude.
+      # Available rules: https://github.com/securego/gosec#available-rules
+      # Default: []
+      excludes:
+        - G304
+        - G404
+    misspell:
+      # ID3 uses the British spelling "Synchronised" in SYLT frame names.
+      # Correct spellings using locale preferences for US or UK.
+      # Setting locale to US will correct the British spelling of 'colour' to 'color'.
+      # Default is to use a neutral variety of English.
+      locale: US
+      # Typos to ignore.
+      # Should be in lower case.
+      # Default: []
+      ignore-rules:
+        - Synchronised
+
+  # Defines a set of rules to ignore issues.
+  # It does not skip the analysis, and so does not ignore "typecheck" errors.
+  exclusions:
+    # Predefined exclusion rules.
+    # Default: []
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+      - legacy
+
+formatters:
+  # Enable specific formatter.
+  # Default: [] (uses standard Go formatting)
   enable:
-    # - dupl - it's very slow, enable if you really know why you need it
-    - errcheck
-    - goconst
-    - godot
+    - gci
+    - gofmt
+    - gofumpt
     - goimports
-    - gosec
-    - gosimple
-    - govet
-    - ineffassign
-    - lll
-    - revive
-    - staticcheck
-    - typecheck
-    - unused
-    - wsl
+    - golines
+
+  # Formatters settings.
+  settings:
+    golines:
+      # Target maximum line length.
+      # Default: 100
+      max-len: 120
 
 issues:
-  exclude-use-default: false
-  exclude:
-    # _ instead of err checks
-    - G104
-    - G404
-    # for "public interface + private struct implementation" cases only!
-    - exported func .* returns unexported type .*, which can be annoying to use
-    # can be removed in the development phase
-    # - (comment on exported (method|function|type|const)|should have( a package)? comment|comment should be of the form)
-    # not for the active development - can be removed in the stable phase
-    - should have a package comment, unless it's in another file for this package
-    - don't use an underscore in package name
-    # EXC0001 errcheck: Almost all programs ignore errors on these functions and in most cases it's ok
-    - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print(f|ln)?|os\.(Un)?Setenv). is not checked
-    - should check returned error before deferring
-  exclude-dirs:
-    - bin
-    - test
-    - tmp
-    - var
-    - vendor
-  exclude-files:
-    - \.pb\.go$
-    - \.pb\.gw\.go$
-    - \.pb\.goclay\.go$
-  # Fix found issues (if it's supported by the linter).
-  # Default: false
-  fix: false
+  # Maximum issues count per one linter.
+  # Set to 0 to disable.
+  # Default: 50
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text.
+  # Set to 0 to disable.
+  # Default: 3
+  max-same-issues: 0
+
+# Options for analysis running.
+run:
+  # Timeout for total work, e.g. 30s, 5m, 5m30s.
+  # If the value is lower or equal to 0, the timeout is disabled.
+  # Default: 0 (disabled)
+  timeout: 10m
+  # The mode used to evaluate relative paths.
+  # It's used by exclusions, Go plugins, and some linters.
+  # The value can be:
+  # - `gomod`: the paths will be relative to the directory of the `go.mod` file.
+  # - `gitroot`: the paths will be relative to the git root (the parent directory of `.git`).
+  # - `cfg`: the paths will be relative to the configuration file.
+  # - `wd` (NOT recommended): the paths will be relative to the place where golangci-lint is run.
+  # Default: cfg
+  relative-path-mode: gomod
+  # If set, we pass it to "go list -mod={option}". From "go help modules":
+  # If invoked with -mod=readonly, the go command is disallowed from the implicit
+  # automatic updating of go.mod described above. Instead, it fails when any changes
+  # to go.mod are needed. This setting is most useful to check that go.mod does
+  # not need updates, such as in a continuous integration and testing system.
+  # If invoked with -mod=vendor, the go command assumes that the vendor
+  # directory holds the correct copies of dependencies and ignores
+  # the dependency descriptions in go.mod.
+  #
+  # Allowed values: readonly|vendor|mod
+  # Default: ""
+  modules-download-mode: readonly

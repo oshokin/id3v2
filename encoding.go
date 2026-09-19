@@ -77,9 +77,14 @@ var (
 	xEncodingUTF8 = unicode.UTF8
 )
 
-// bom is the Byte Order Mark (BOM) used in UTF-16 encoded Unicode.
-// See https://en.wikipedia.org/wiki/Byte_order_mark.
-var bom = []byte{0xFF, 0xFE}
+var (
+	// bom is the little-endian Byte Order Mark used in UTF-16 encoded Unicode.
+	// See https://en.wikipedia.org/wiki/Byte_order_mark.
+	bom = []byte{0xFF, 0xFE}
+
+	// utf16BEBOM is the big-endian Byte Order Mark used in UTF-16 encoded Unicode.
+	utf16BEBOM = []byte{0xFE, 0xFF}
+)
 
 // getEncoding returns the Encoding corresponding to the given ID3v2 key.
 // If the key is invalid, it defaults to EncodingUTF8.
@@ -128,32 +133,85 @@ func decodeText(src []byte, from Encoding) string {
 	fromXEncoding := resolveXEncoding(src, from)
 
 	// Decode the byte slice into a UTF-8 string.
+	// Invalid UTF-16 sequences become U+FFFD via x/text; a real U+FFFD in the
+	// source text must be kept, so replacement characters are never stripped.
 	result, err := fromXEncoding.NewDecoder().Bytes(src)
 	if err != nil {
 		return string(src) // Fallback to raw bytes if decoding fails.
-	}
-
-	// HACK: Remove the REPLACEMENT CHARACTER (�) if encoding went wrong.
-	// This is a workaround for malformed UTF-16 data.
-	if from.Equals(EncodingUTF16) {
-		result = bytes.ReplaceAll(result, []byte{0xEF, 0xBF, 0xBD}, []byte{})
 	}
 
 	return string(result)
 }
 
 // decodeMulti decodes a multi-valued byte slice `src` from the specified `from` encoding into a slice of UTF-8 strings.
-// It splits the byte slice using the termination bytes and decodes each part.
+// ISO-8859-1 and UTF-8 values are split on a single 0x00.
+// UTF-16 and UTF-16BE values are split on a 0x00 0x00 terminator only at a two-byte code-unit boundary.
 func decodeMulti(src []byte, from Encoding) []string {
-	src = bytes.TrimSuffix(src, from.TerminationBytes)
-	splitted := bytes.Split(src, from.TerminationBytes) // Split into parts.
+	parts := splitEncodedTextValues(src, from)
+	res := make([]string, 0, len(parts))
 
-	res := make([]string, 0, len(splitted))
-	for _, s := range splitted {
-		res = append(res, decodeText(s, from)) // Decode each part.
+	if from.Equals(EncodingUTF16) {
+		bomPrefix := utf16BOMPrefix(parts)
+		for i, part := range parts {
+			if i > 0 && !hasUTF16BOM(part) {
+				part = append(append(make([]byte, 0, len(bomPrefix)+len(part)), bomPrefix...), part...)
+			}
+
+			res = append(res, decodeText(part, from))
+		}
+
+		return res
+	}
+
+	for _, part := range parts {
+		res = append(res, decodeText(part, from))
 	}
 
 	return res
+}
+
+// splitEncodedTextValues splits encoded text values on the encoding terminator.
+func splitEncodedTextValues(src []byte, from Encoding) [][]byte {
+	if from.Equals(EncodingUTF16) || from.Equals(EncodingUTF16BE) {
+		return splitUTF16TextValues(src)
+	}
+
+	src = bytes.TrimSuffix(src, from.TerminationBytes)
+
+	return bytes.Split(src, from.TerminationBytes)
+}
+
+// splitUTF16TextValues splits UTF-16 text on a 0x00 0x00 terminator only when it is aligned to a two-byte code unit.
+func splitUTF16TextValues(src []byte) [][]byte {
+	if n := len(src); n >= 2 && n%2 == 0 && src[n-2] == 0 && src[n-1] == 0 {
+		src = src[:n-2]
+	}
+
+	parts := make([][]byte, 0, 2)
+	start := 0
+
+	for i := 0; i+1 < len(src); i += 2 {
+		if src[i] == 0 && src[i+1] == 0 {
+			parts = append(parts, src[start:i])
+			start = i + 2
+		}
+	}
+
+	return append(parts, src[start:])
+}
+
+// hasUTF16BOM reports whether src begins with a UTF-16 BOM.
+func hasUTF16BOM(src []byte) bool {
+	return len(src) >= 2 && (bytes.Equal(src[:2], bom) || bytes.Equal(src[:2], utf16BEBOM))
+}
+
+// utf16BOMPrefix returns the BOM of the first UTF-16 value, or the big-endian BOM used when writing EncodingUTF16.
+func utf16BOMPrefix(parts [][]byte) []byte {
+	if len(parts) > 0 && hasUTF16BOM(parts[0]) {
+		return parts[0][:2]
+	}
+
+	return utf16BEBOM
 }
 
 // encodeWriteText encodes the UTF-8 string `src`
@@ -176,11 +234,6 @@ func encodeWriteText(bw *bufferedWriter, src string, to Encoding) error {
 	}
 
 	bw.WriteString(encoded)
-
-	// Add a null terminator for UTF-16 if it's missing.
-	if to.Equals(EncodingUTF16) && !bytes.HasSuffix([]byte(encoded), []byte{0}) {
-		bw.WriteByte(0)
-	}
 
 	return nil
 }

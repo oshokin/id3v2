@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -102,45 +103,6 @@ var (
 	// Parse all frames.
 	parseOpts = Options{Parse: true}
 )
-
-func init() {
-	if err := resetMP3Tag(); err != nil {
-		panic(fmt.Sprintf("Error while reseting mp3 file: %v", err))
-	}
-}
-
-// resetMP3Tag sets default tag in file located by mp3Path.
-func resetMP3Tag() error {
-	tag, err := Open(mp3Path, Options{Parse: false})
-	if tag == nil || err != nil {
-		return err
-	}
-	defer tag.Close()
-
-	tag.SetTitle("Title")
-	tag.SetArtist(ArtistFrameDescription)
-	tag.SetAlbum("Album")
-	tag.SetYear("2016")
-	tag.SetGenre("Genre")
-
-	tag.AddAttachedPicture(frontCover)
-	tag.AddAttachedPicture(backCover)
-
-	tag.AddUnsynchronisedLyricsFrame(engUSLF)
-	tag.AddUnsynchronisedLyricsFrame(gerUSLF)
-
-	tag.AddUserDefinedTextFrame(musicBrainzUDTF)
-	tag.AddUFIDFrame(musicBrainzUF)
-
-	tag.AddFrame(tag.CommonID("Popularimeter"), popmFrame)
-
-	tag.AddCommentFrame(engComm)
-	tag.AddCommentFrame(gerComm)
-
-	tag.AddFrame(unknownFrameID, unknownFrame)
-
-	return tag.Save()
-}
 
 func mustReadFile(path string) []byte {
 	contents, err := os.ReadFile(filepath.Clean(path))
@@ -280,21 +242,20 @@ func TestIntegrityOfMusicAtTheEnd(t *testing.T) {
 // TestCheckPermissions checks
 // if tag.Save() creates file with the same permissions of original file.
 func TestCheckPermissions(t *testing.T) {
-	originalFile, err := os.Open(mp3Path)
-	if err != nil {
-		t.Fatal("Error while opening mp3 file:", err)
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are not preserved on Windows")
 	}
 
-	originalStat, err := originalFile.Stat()
+	path := copyFixture(t)
+
+	originalStat, err := os.Stat(path)
 	if err != nil {
 		t.Fatal("Error while getting mp3 file stat:", err)
 	}
 
 	originalMode := originalStat.Mode()
 
-	originalFile.Close()
-
-	tag, err := Open(mp3Path, parseOpts)
+	tag, err := Open(path, parseOpts)
 	if err != nil {
 		t.Fatal("Error while parsing a tag:", err)
 	}
@@ -303,22 +264,17 @@ func TestCheckPermissions(t *testing.T) {
 		t.Error("Error while saving a tag:", err)
 	}
 
-	tag.Close()
-
-	newFile, err := os.Open(mp3Path)
-	if err != nil {
-		t.Fatal("Error while opening mp3 file:", err)
+	if err = tag.Close(); err != nil {
+		t.Fatal(err)
 	}
 
-	newStat, err := newFile.Stat()
+	newStat, err := os.Stat(path)
 	if err != nil {
 		t.Fatal("Error while getting mp3 file stats:", err)
 	}
 
-	newMode := newStat.Mode()
-
-	if originalMode != newMode {
-		t.Errorf("Expected permissions: %v, got %v", originalMode, newMode)
+	if originalMode != newStat.Mode() {
+		t.Errorf("Expected permissions: %v, got %v", originalMode, newStat.Mode())
 	}
 }
 

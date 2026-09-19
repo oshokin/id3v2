@@ -8,10 +8,14 @@ The original author hasn't updated it in over two years, so I decided to do it m
 ## What's New?
 - **Dropped v1 library** – It's outdated, unnecessary, and I don't care about legacy stuff.
 - **Removed ignored errors** – No silent failures, better debugging.
-- **Updated Go version requirement** – Works with Go **1.23+** because I used this for a modern project. v1 is older than me.
+- **Updated Go version requirement** – Works with Go **1.27.1+** because I used this for a modern project. v1 is older than me.
 - **Added linters and task files** – Helps with local development and keeps the code clean.
 - **Added SYLT frame support** – Enables synchronized lyrics/text in MP3 files.
 - **Added LRC file parsing** – Since you're often adding LRC file content to MP3s, this is essential.
+- **Safer Parse/Save** – Short reads fail instead of silently succeeding. `Save()` writes to a temp file, then replaces the original and reopens it.
+- **v2.3 / v2.4 semantics** – v2.4 multi-value text/TXXX, UTF-16 split on code-unit boundaries, versions other than 2.3/2.4 are rejected.
+- **CHAP / UFID / POPM** – Nested chapter frames, unique file IDs and popularimeter frames no longer drop or mis-parse data.
+- **CI and SemVer** – Linux + Windows, lint, race, `go mod tidy -diff` / `verify`. Tags bump from conventional commits after CI.
 
 I'll try to keep up with updates from the original repository, but no promises — I'm busy as hell.
 
@@ -105,3 +109,12 @@ sylf := id3v2.SynchronisedLyricsFrame{
 // Add the synchronized lyrics frame to the tag.
 tag.AddSynchronisedLyricsFrame(sylf)
 ```
+
+## Development
+
+```bash
+task
+task release-check
+```
+
+`task` lists the available targets. `task release-check` runs module checks, lint, build, tests and race tests.

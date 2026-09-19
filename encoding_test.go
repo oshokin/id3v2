@@ -57,19 +57,88 @@ func TestDecodeTextParallel(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for _, tc := range testCases {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			got := decodeText(tc.src, tc.from)
 			if got != tc.utf8 {
 				t.Errorf("Expected %q from %v encoding, got %q", tc.utf8, tc.from, got)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
+}
+
+func TestDecodeMultiUTF16BEAlignedTerminator(t *testing.T) {
+	t.Parallel()
+
+	// Ā = 01 00, terminator = 00 00, B = 00 42, terminator = 00 00.
+	src := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x42, 0x00, 0x00}
+
+	got := decodeMulti(src, EncodingUTF16BE)
+	if len(got) != 2 || got[0] != "Ā" || got[1] != "B" {
+		t.Fatalf("decodeMulti = %#v, want [Ā B]", got)
+	}
+}
+
+func TestParseTextFrameUTF16LEBOMMultiValue(t *testing.T) {
+	t.Parallel()
+
+	// Encoding UTF-16 with a little-endian BOM, then Ā and B.
+	payload := []byte{
+		1,
+		0xFF, 0xFE,
+		0x00, 0x01,
+		0x00, 0x00,
+		0x42, 0x00,
+		0x00, 0x00,
+	}
+
+	got, err := parseTextFrame(newBufferedReader(bytes.NewReader(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tf, ok := got.(TextFrame)
+	if !ok {
+		t.Fatalf("got %T", got)
+	}
+
+	if tf.Text != "Ā" || len(tf.Multi) != 2 || tf.Multi[0] != "Ā" || tf.Multi[1] != "B" {
+		t.Fatalf("got Text=%q Multi=%#v", tf.Text, tf.Multi)
+	}
+}
+
+func TestUTF16ReplacementCharacterPreserved(t *testing.T) {
+	const text = "abc\uFFFDdef"
+
+	// UTF-16LE with BOM: "abc" + U+FFFD + "def".
+	src := []byte{
+		0xFF, 0xFE,
+		0x61, 0x00, 0x62, 0x00, 0x63, 0x00,
+		0xFD, 0xFF,
+		0x64, 0x00, 0x65, 0x00, 0x66, 0x00,
+	}
+
+	got := decodeText(src, EncodingUTF16)
+	if got != text {
+		t.Fatalf("decodeText: got %q, want %q", got, text)
+	}
+
+	buf := new(bytes.Buffer)
+	bw := newBufferedWriter(buf)
+
+	if err := encodeWriteText(bw, text, EncodingUTF16); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	got = decodeText(buf.Bytes(), EncodingUTF16)
+	if got != text {
+		t.Fatalf("round-trip: got %q, want %q", got, text)
+	}
 }
 
 func TestEncodeWriteText(t *testing.T) {
@@ -79,7 +148,7 @@ func TestEncodeWriteText(t *testing.T) {
 		expected []byte
 	}{
 		{"Héllö", EncodingISO, []byte{0x48, 0xE9, 0x6C, 0x6C, 0xF6}},
-		{"Héllö", EncodingUTF16, []byte{0xFE, 0xFF, 0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6, 0x00}},
+		{"Héllö", EncodingUTF16, []byte{0xFE, 0xFF, 0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}},
 		{"Héllö", EncodingUTF16BE, []byte{0x00, 0x48, 0x00, 0xE9, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0xF6}},
 	}
 

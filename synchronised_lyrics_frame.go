@@ -2,6 +2,7 @@ package id3v2
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"regexp"
 	"strconv"
@@ -137,10 +138,10 @@ func (sylf SynchronisedLyricsFrame) WriteTo(w io.Writer) (n int64, err error) {
 
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the frame header fields.
-		bw.WriteByte(sylf.Encoding.Key)                              // Write the encoding byte.
+		bw.writeByte(sylf.Encoding.Key)                              // Write the encoding byte.
 		bw.WriteString(sylf.Language)                                // Write the language code.
-		bw.WriteByte(byte(sylf.TimestampFormat))                     // Write the timestamp format.
-		bw.WriteByte(byte(sylf.ContentType))                         // Write the content type.
+		bw.writeByte(byte(sylf.TimestampFormat))                     // Write the timestamp format.
+		bw.writeByte(byte(sylf.ContentType))                         // Write the content type.
 		bw.EncodeAndWriteText(sylf.ContentDescriptor, sylf.Encoding) // Write the content descriptor.
 
 		// Write the descriptor termination bytes.
@@ -203,7 +204,6 @@ func ParseLRCFile(inputReader io.Reader) (ParseLRCFileParsingResult, error) {
 
 		var offsetValue int64
 
-		//nolint:govet // Shadowing is not an issue here since we return on error.
 		offsetValue, err = strconv.ParseInt(match[1], 10, 64)
 		if err != nil {
 			return ParseLRCFileParsingResult{}, err // Return an error if the offset is invalid.
@@ -239,9 +239,21 @@ func ParseLRCFile(inputReader io.Reader) (ParseLRCFileParsingResult, error) {
 		switch {
 		case len(timestampMatch) == 5:
 			// Extract the timestamp components and lyrics.
-			minutes, _ := strconv.ParseInt(timestampMatch[1], 10, 0)
-			seconds, _ := strconv.ParseInt(timestampMatch[2], 10, 0)
-			hundredths, _ := strconv.ParseInt(timestampMatch[3], 10, 0)
+			minutes, parseErr := strconv.ParseInt(timestampMatch[1], 10, 0)
+			if parseErr != nil {
+				return ParseLRCFileParsingResult{}, parseErr
+			}
+
+			seconds, parseErr := strconv.ParseInt(timestampMatch[2], 10, 0)
+			if parseErr != nil {
+				return ParseLRCFileParsingResult{}, parseErr
+			}
+
+			hundredths, parseErr := strconv.ParseInt(timestampMatch[3], 10, 0)
+			if parseErr != nil {
+				return ParseLRCFileParsingResult{}, parseErr
+			}
+
 			lyric := strings.TrimSpace(timestampMatch[4])
 
 			// Convert the timestamp to milliseconds.
@@ -270,10 +282,10 @@ func ParseLRCFile(inputReader io.Reader) (ParseLRCFileParsingResult, error) {
 
 // parseSynchronisedLyricsFrame parses a SYLT frame from a bufferedReader.
 func parseSynchronisedLyricsFrame(br *bufferedReader, _ byte) (Framer, error) {
-	encoding := getEncoding(br.ReadByte())     // Read the encoding byte.
+	encoding := getEncoding(br.readByte())     // Read the encoding byte.
 	language := br.Next(3)                     // Read the language code.
-	timestampFormat := br.ReadByte()           // Read the timestamp format.
-	contentType := br.ReadByte()               // Read the content type.
+	timestampFormat := br.readByte()           // Read the timestamp format.
+	contentType := br.readByte()               // Read the content type.
 	contentDescriptor := br.ReadText(encoding) // Read the content descriptor.
 
 	if br.Err() != nil {
@@ -282,33 +294,47 @@ func parseSynchronisedLyricsFrame(br *bufferedReader, _ byte) (Framer, error) {
 
 	var s []SynchronizedText
 
-	// Read each synchronized text entry until the end of the frame.
 	for {
-		textLyric, err := br.readTillDelimiters(encoding.TerminationBytes) // Read the text.
-		if err != nil {
-			break // Stop reading if we reach the end of the frame.
+		var (
+			textLyric []byte
+			err       error
+		)
+		if encoding.Equals(EncodingUTF16) || encoding.Equals(EncodingUTF16BE) {
+			textLyric, err = br.readTillUTF16Terminator()
+		} else {
+			textLyric, err = br.readTillDelimiters(encoding.TerminationBytes)
 		}
 
-		t := SynchronizedText{Text: decodeText(textLyric, encoding)} // Decode the text.
-		br.Next(len(encoding.TerminationBytes))                      // Skip the text termination bytes.
+		if err != nil {
+			if errors.Is(err, io.EOF) && len(textLyric) == 0 {
+				break
+			}
 
-		timeStamp := br.Next(4)                             // Read the timestamp.
-		timeStampUint := binary.BigEndian.Uint32(timeStamp) // Convert the timestamp to uint32.
+			return nil, err
+		}
+
+		t := SynchronizedText{Text: decodeText(textLyric, encoding)}
+		br.Next(len(encoding.TerminationBytes))
+
+		if br.Err() != nil {
+			return nil, br.Err()
+		}
+
+		timeStampUint, err := readUint32BE(br)
+		if err != nil {
+			return nil, err
+		}
+
 		t.Timestamp = timeStampUint
-
-		s = append(s, t) // Add the entry to the list.
+		s = append(s, t)
 	}
 
-	// Create and return the SYLT frame.
-	sylf := SynchronisedLyricsFrame{
+	return SynchronisedLyricsFrame{
 		Encoding:          encoding,
 		Language:          string(language),
 		TimestampFormat:   SYLTTimestampFormat(timestampFormat),
 		ContentType:       SYLTContentType(contentType),
 		ContentDescriptor: decodeText(contentDescriptor, encoding),
 		SynchronizedTexts: s,
-	}
-
-	//nolint:nilerr // Error is intentionally nil to satisfy the framers map function contract.
-	return sylf, nil
+	}, nil
 }

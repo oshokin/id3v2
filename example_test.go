@@ -38,7 +38,8 @@ func Example() {
 
 	// Write tag to file.
 	if err = tag.Save(); err != nil {
-		log.Fatal("Error while saving a tag: ", err)
+		log.Println("Error while saving a tag: ", err)
+		return
 	}
 }
 
@@ -382,17 +383,20 @@ func ExampleSynchronisedLyricsFrame_get() {
 	// Retrieve the last synchronized lyrics frame.
 	frame := tag.GetLastFrame(tag.CommonID("Synchronised lyrics/text"))
 	if frame == nil {
-		log.Fatal("No synchronized lyrics frame found")
+		log.Println("No synchronized lyrics frame found")
+		return
 	}
 
 	// Assert that the frame is a SynchronisedLyricsFrame.
 	sylf, ok := frame.(id3v2.SynchronisedLyricsFrame)
 	if !ok {
-		log.Fatal("Could not assert frame as SynchronisedLyricsFrame")
+		log.Println("Could not assert frame as SynchronisedLyricsFrame")
+		return
 	}
 
 	// Print the synchronized lyrics.
 	fmt.Println("Synchronized Lyrics:")
+
 	for _, text := range sylf.SynchronizedTexts {
 		fmt.Printf("[%d] %s\n", text.Timestamp, text.Text)
 	}

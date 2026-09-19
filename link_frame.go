@@ -2,10 +2,12 @@ package id3v2
 
 import "io"
 
-// LinkFrame represents a frame that contains a URL or link.
-// It is used for frames like "WXXX" (User-defined URL link) in ID3v2 tags.
+// LinkFrame represents a WXXX (user-defined URL link) frame.
+// The public v2 model historically stores only Encoding and URL.
+// The WXXX description field is parsed and discarded because adding
+// an exported Description field would break unkeyed composite literals.
 type LinkFrame struct {
-	Encoding Encoding // The text encoding used for the URL.
+	Encoding Encoding // The text encoding used for the description terminator.
 	URL      string   // The actual URL or link.
 }
 
@@ -14,9 +16,11 @@ type LinkFrame struct {
 const linkFrameUniqueIdentifier = "ID"
 
 // Size calculates the total size of the LinkFrame in bytes.
-// This includes the encoding byte, the encoded URL, and the termination bytes.
+// This includes the encoding byte, an empty description terminator, and the ISO-8859-1 URL.
 func (lf LinkFrame) Size() int {
-	return 1 + encodedSize(lf.URL, lf.Encoding) + len(lf.Encoding.TerminationBytes)
+	return 1 +
+		len(lf.Encoding.TerminationBytes) +
+		encodedSize(lf.URL, EncodingISO)
 }
 
 // UniqueIdentifier returns a unique identifier for the LinkFrame.
@@ -26,34 +30,37 @@ func (lf LinkFrame) UniqueIdentifier() string {
 }
 
 // WriteTo writes the LinkFrame to the provided io.Writer.
-// It encodes the URL using the specified encoding and writes the frame's data.
-// Returns the number of bytes written and any error encountered.
+// WXXX is serialized as: encoding, empty description terminator, URL in ISO-8859-1.
 func (lf LinkFrame) WriteTo(w io.Writer) (int64, error) {
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(lf.Encoding.Key)
+		bw.writeByte(lf.Encoding.Key)
 
-		// Encode and write the URL.
-		bw.EncodeAndWriteText(lf.URL, lf.Encoding)
-
-		// Write the termination bytes for the encoding.
-		_, err := bw.Write(lf.Encoding.TerminationBytes)
-		if err != nil {
+		// Write the empty description terminator required by WXXX.
+		if _, err := bw.Write(lf.Encoding.TerminationBytes); err != nil {
 			return err
 		}
+
+		// Encode and write the URL as ISO-8859-1.
+		bw.EncodeAndWriteText(lf.URL, EncodingISO)
 
 		return nil
 	})
 }
 
-// parseLinkFrame parses a LinkFrame from a bufferedReader.
-// It reads the encoding, URL, and termination bytes, and constructs a LinkFrame.
-// Returns the parsed LinkFrame and any error encountered.
-func parseLinkFrame(br *bufferedReader) (Framer, error) {
-	// Read the encoding byte and determine the encoding type.
-	encoding := getEncoding(br.ReadByte())
+func parseUserDefinedURLFrame(br *bufferedReader, _ byte) (Framer, error) {
+	return parseLinkFrame(br)
+}
 
-	// Check for errors after reading the encoding byte.
+func parseLinkFrame(br *bufferedReader) (Framer, error) {
+	encoding := getEncoding(br.readByte())
+	if br.Err() != nil {
+		return nil, br.Err()
+	}
+
+	// Description is required by the WXXX layout but is not represented
+	// in the public v2 LinkFrame. Discard it to keep source compatibility.
+	_ = br.ReadText(encoding)
 	if br.Err() != nil {
 		return nil, br.Err()
 	}
@@ -67,11 +74,9 @@ func parseLinkFrame(br *bufferedReader) (Framer, error) {
 		return nil, err
 	}
 
-	// Decode the URL from the buffer using the specified encoding.
-	lf := LinkFrame{
+	// Decode the URL from the buffer using ISO-8859-1.
+	return LinkFrame{
 		Encoding: encoding,
-		URL:      decodeText(buf.Bytes(), encoding),
-	}
-
-	return lf, nil
+		URL:      decodeText(buf.Bytes(), EncodingISO),
+	}, nil
 }

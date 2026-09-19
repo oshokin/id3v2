@@ -15,10 +15,24 @@ type UserDefinedTextFrame struct {
 // Size calculates the total size of the UserDefinedTextFrame in bytes.
 // This includes the encoding byte, the description, termination bytes, and the value.
 func (udtf UserDefinedTextFrame) Size() int {
-	return 1 + // 1 byte for the encoding
-		encodedSize(udtf.Description, udtf.Encoding) + // Size of the description
-		len(udtf.Encoding.TerminationBytes) + // Size of the termination bytes
-		encodedSize(udtf.Value, udtf.Encoding) // Size of the value
+	return udtf.sizeForVersion(4)
+}
+
+func (udtf UserDefinedTextFrame) sizeForVersion(version byte) int {
+	values := []string{udtf.Value}
+	if version == 4 {
+		values = textValues(udtf.Value, udtf.Multi)
+	}
+
+	size := 1 + encodedSize(udtf.Description, udtf.Encoding) + len(udtf.Encoding.TerminationBytes)
+	for i, value := range values {
+		size += encodedSize(value, udtf.Encoding)
+		if i < len(values)-1 {
+			size += len(udtf.Encoding.TerminationBytes)
+		}
+	}
+
+	return size
 }
 
 // UniqueIdentifier returns a string that uniquely identifies this frame.
@@ -31,21 +45,36 @@ func (udtf UserDefinedTextFrame) UniqueIdentifier() string {
 // WriteTo writes the UserDefinedTextFrame to the provided io.Writer.
 // It returns the number of bytes written and any error encountered.
 func (udtf UserDefinedTextFrame) WriteTo(w io.Writer) (n int64, err error) {
+	return udtf.writeToVersion(w, 4)
+}
+
+func (udtf UserDefinedTextFrame) writeToVersion(w io.Writer, version byte) (int64, error) {
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(udtf.Encoding.Key)
+		bw.writeByte(udtf.Encoding.Key)
 
 		// Write the description, encoded according to the specified encoding.
 		bw.EncodeAndWriteText(udtf.Description, udtf.Encoding)
 
 		// Write the termination bytes for the description.
-		_, err = bw.Write(udtf.Encoding.TerminationBytes)
-		if err != nil {
+		if _, err := bw.Write(udtf.Encoding.TerminationBytes); err != nil {
 			return err
 		}
 
-		// Write the value, encoded according to the specified encoding.
-		bw.EncodeAndWriteText(udtf.Value, udtf.Encoding)
+		values := []string{udtf.Value}
+		if version == 4 {
+			values = textValues(udtf.Value, udtf.Multi)
+		}
+
+		for i, value := range values {
+			bw.EncodeAndWriteText(value, udtf.Encoding)
+
+			if i < len(values)-1 {
+				if _, err := bw.Write(udtf.Encoding.TerminationBytes); err != nil {
+					return err
+				}
+			}
+		}
 
 		return nil
 	})
@@ -57,7 +86,7 @@ func (udtf UserDefinedTextFrame) WriteTo(w io.Writer) (n int64, err error) {
 // in the Multi field.
 func parseUserDefinedTextFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the encoding byte and determine the text encoding.
-	encoding := getEncoding(br.ReadByte())
+	encoding := getEncoding(br.readByte())
 
 	// Read the description using the specified encoding.
 	description := br.ReadText(encoding)

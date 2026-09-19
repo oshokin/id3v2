@@ -1,6 +1,12 @@
 package id3v2
 
-import "io"
+import (
+	"errors"
+	"fmt"
+	"io"
+)
+
+const ufidMaxIdentifierSize = 64
 
 // UFIDFrame represents a "Unique File Identifier" frame in an ID3v2 tag.
 // This frame is used to store a unique identifier for the file, typically associated with
@@ -16,33 +22,47 @@ func (ufid UFIDFrame) UniqueIdentifier() string {
 	return ufid.OwnerIdentifier
 }
 
+func (ufid UFIDFrame) encodedOwner() int {
+	return encodedSize(ufid.OwnerIdentifier, EncodingISO) + len(EncodingISO.TerminationBytes)
+}
+
 // Size calculates the total size of the UFID frame in bytes.
 // This includes the size of the owner identifier (encoded in ISO-8859-1), the termination bytes,
 // and the size of the identifier itself.
 func (ufid UFIDFrame) Size() int {
-	return encodedSize(ufid.OwnerIdentifier, EncodingISO) + len(EncodingISO.TerminationBytes) + len(ufid.Identifier)
+	return ufid.encodedOwner() + len(ufid.Identifier)
 }
 
 // WriteTo writes the UFID frame to the provided io.Writer.
-// It returns the number of bytes written and any error encountered during the write operation.
+// Size and WriteTo use the same ISO-8859-1 encoding path for the owner identifier.
 // The frame is written in the following format:
 //   - Owner identifier (encoded in ISO-8859-1)
 //   - Termination bytes (0x00 for ISO-8859-1)
 //   - Identifier (raw bytes)
 func (ufid UFIDFrame) WriteTo(w io.Writer) (n int64, err error) {
+	if ufid.OwnerIdentifier == "" {
+		return 0, errors.New("UFID owner identifier must not be empty")
+	}
+
+	if len(ufid.Identifier) > ufidMaxIdentifierSize {
+		return 0, fmt.Errorf(
+			"UFID identifier is %d bytes; maximum is %d",
+			len(ufid.Identifier),
+			ufidMaxIdentifierSize,
+		)
+	}
+
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
-		// Write the owner identifier as a string.
-		bw.WriteString(ufid.OwnerIdentifier)
+		// Write the owner identifier encoded as ISO-8859-1.
+		bw.EncodeAndWriteText(ufid.OwnerIdentifier, EncodingISO)
 
 		// Write the termination bytes for the owner identifier.
-		_, err = bw.Write(EncodingISO.TerminationBytes)
-		if err != nil {
+		if _, err := bw.Write(EncodingISO.TerminationBytes); err != nil {
 			return err
 		}
 
 		// Write the identifier as raw bytes.
-		_, err = bw.Write(ufid.Identifier)
-		if err != nil {
+		if _, err := bw.Write(ufid.Identifier); err != nil {
 			return err
 		}
 
@@ -60,16 +80,12 @@ func parseUFIDFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the remaining bytes as the unique identifier.
 	ident := br.ReadAll()
 
-	// Check for any errors during reading.
 	if br.Err() != nil {
 		return nil, br.Err()
 	}
 
-	// Create and return a UFIDFrame with the parsed data.
-	ufid := UFIDFrame{
+	return UFIDFrame{
 		OwnerIdentifier: decodeText(owner, EncodingISO), // Decode the owner identifier from ISO-8859-1 to a string.
 		Identifier:      ident,                          // Use the raw bytes for the identifier.
-	}
-
-	return ufid, nil
+	}, nil
 }

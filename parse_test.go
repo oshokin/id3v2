@@ -8,12 +8,21 @@ import (
 	"testing"
 )
 
+func TestParseRejectsUnsupportedVersions(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []byte{0, 1, 2, 5, 6, 0xff} {
+		header := []byte{'I', 'D', '3', version, 0, 0, 0, 0, 0, 0}
+
+		_, err := ParseReader(bytes.NewReader(header), Options{Parse: true})
+		if !errors.Is(err, ErrUnsupportedVersion) {
+			t.Errorf("version %d: got %v, want ErrUnsupportedVersion", version, err)
+		}
+	}
+}
+
 // TestParse compares parsed frames with expected frames.
 func TestParse(t *testing.T) {
-	if err := resetMP3Tag(); err != nil {
-		t.Fatal("Error while reseting mp3 file:", err)
-	}
-
 	tag, err := Open(mp3Path, parseOpts)
 	if tag == nil || err != nil {
 		t.Error("Error while opening mp3 file:", err)
@@ -178,7 +187,7 @@ func TestParseInvalidFrameSize(t *testing.T) {
 	}
 
 	// Write valid TIT2 frame.
-	_, err = bw.Write([]byte{0x54, 0x49, 0x54, 0x32, 00, 00, 00, 06, 00, 00, 03}) // header and encoding
+	_, err = bw.Write([]byte{0x54, 0x49, 0x54, 0x32, 0o0, 0o0, 0o0, 0o6, 0o0, 0o0, 0o3}) // header and encoding
 	if err != nil {
 		t.Fatal("Error while writing TIT2 frame:", err)
 	}
@@ -186,7 +195,7 @@ func TestParseInvalidFrameSize(t *testing.T) {
 	bw.WriteString("Title")
 
 	// Write invalid frame (size byte can't be greater than 127).
-	_, err = bw.Write([]byte{0x54, 0x49, 0x54, 0x32, 255, 255, 255, 255, 00, 00})
+	_, err = bw.Write([]byte{0x54, 0x49, 0x54, 0x32, 255, 255, 255, 255, 0o0, 0o0})
 	if err != nil {
 		t.Fatal("Error while frame:", err)
 	}
@@ -266,7 +275,11 @@ func TestParseV3UnsafeSize(t *testing.T) {
 	}
 
 	if parsedTag.Title() != title {
-		t.Fatalf("Titles are not equal: len(parsedTag.Title()) == %v, len(title) == %v", len(parsedTag.Title()), len(title))
+		t.Fatalf(
+			"Titles are not equal: len(parsedTag.Title()) == %v, len(title) == %v",
+			len(parsedTag.Title()),
+			len(title),
+		)
 	}
 }
 
@@ -473,9 +486,6 @@ func testMultiTXXXFrames(t *testing.T, tag *Tag) {
 		}
 
 		parsedUserDefinedTextFrame = txxx
-
-		//nolint:forbidigo // Allowed in tests for debugging or output purposes.
-		fmt.Printf("%s\n", txxx.Description)
 	}
 
 	if err := compareTXXXFrames(parsedUserDefinedTextFrame, multiUDTF); err != nil {

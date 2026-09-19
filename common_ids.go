@@ -211,6 +211,7 @@ var parsers = map[string]func(*bufferedReader, byte) (Framer, error){
 	UserDefinedTextFrameID: parseUserDefinedTextFrame,      // Parser for user-defined text frames.
 	"UFID":                 parseUFIDFrame,                 // Parser for unique file identifier frames.
 	"USLT":                 parseUnsynchronisedLyricsFrame, // Parser for unsynchronized lyrics frames.
+	"WXXX":                 parseUserDefinedURLFrame,       // Parser for user-defined URL frames.
 }
 
 // mustFrameBeInSequence checks if a frame with the given ID must be added to a sequence.
@@ -225,11 +226,23 @@ func mustFrameBeInSequence(id string) bool {
 
 	// Specific frames that should not be added to sequences.
 	switch id {
-	case "MCDI", "ETCO", "SYTC", "RVRB", "MLLT", "PCNT", "RBUF", "POSS", "OWNE", "SEEK", "ASPI":
-	case "IPLS", "RVAD": // Specific ID3v2.3 frames.
+	case "MCDI",
+		"ETCO",
+		"SYTC",
+		"RVRB",
+		"MLLT",
+		"PCNT",
+		"RBUF",
+		"POSS",
+		"OWNE",
+		"SEEK",
+		"ASPI",
+		"IPLS",
+		"RVAD": // IPLS and RVAD are ID3v2.3-only frames.
 		return false
-	}
 
-	// All other frames can be added to sequences.
-	return true
+	default:
+		// All other frames can be added to sequences.
+		return true
+	}
 }

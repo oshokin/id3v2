@@ -27,25 +27,32 @@ type tagHeader struct {
 	Version    byte  // Version of the ID3v2 tag (e.g., 3 for ID3v2.3, 4 for ID3v2.4).
 }
 
+func readTagHeader(rd io.Reader) ([]byte, error) {
+	header := make([]byte, tagHeaderSize)
+
+	n, err := io.ReadFull(rd, header)
+	switch {
+	case err == nil:
+		return header, nil
+	case errors.Is(err, io.EOF) && n == 0:
+		return nil, io.EOF
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return nil, ErrSmallHeaderSize
+	default:
+		return nil, err
+	}
+}
+
 // parseHeader reads and parses the ID3v2 tag header from the provided reader.
 // It returns a tagHeader struct containing the parsed information.
-// If the reader does not contain an ID3v2 tag, it returns errNoTag.
+// If the reader does not contain an ID3v2 tag, it returns ErrNoTag.
 // If the reader provides fewer bytes than the expected header size, it returns ErrSmallHeaderSize.
 func parseHeader(rd io.Reader) (tagHeader, error) {
 	var header tagHeader
 
-	// Create a buffer to hold the tag header data.
-	data := make([]byte, tagHeaderSize)
-
-	// Read the tag header from the reader.
-	n, err := rd.Read(data)
+	data, err := readTagHeader(rd)
 	if err != nil {
 		return header, err
-	}
-
-	// Check if the number of bytes read is less than the expected header size.
-	if n < tagHeaderSize {
-		return header, ErrSmallHeaderSize
 	}
 
 	// Check if the data starts with the ID3 identifier.

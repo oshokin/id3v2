@@ -1,0 +1,72 @@
+# This workflow builds and tests a Go project using GitHub Actions.
+# For more information, see: https://docs.github.com/en/actions/use-cases-and-examples/building-and-testing/building-and-testing-go.
+
+name: CI
+
+# Trigger conditions for the workflow.
+on:
+  push:
+    branches: ["main"] # Trigger on pushes to the 'main' branch.
+    tags:
+      - "v*" # Trigger on tags starting with 'v' (e.g., v1.0.0).
+  pull_request:
+    branches: ["main"] # Trigger on pull requests targeting the 'main' branch.
+
+# Least-privilege token for this workflow.
+permissions:
+  contents: read
+
+# Cancel superseded runs of the same workflow on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint, build and test
+    strategy:
+      fail-fast: false # Keep the other OS running if one fails.
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      # Step 1: Check out the repository code.
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      # Step 2: Set up the Go environment.
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod # Automatically detect the Go version from go.mod.
+          cache-dependency-path: go.sum # Cache modules using the go.sum checksums.
+
+      # Step 3: Run golangci-lint on Ubuntu only.
+      - name: Run golangci-lint
+        if: runner.os == 'Linux'
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.13.2 # Must match GOLANGCI_VERSION in taskfile.yaml.
+
+      # Step 4: Verify go.mod and go.sum on Ubuntu only.
+      - name: Check modules
+        if: runner.os == 'Linux'
+        run: |
+          go mod tidy -diff
+          go mod verify
+
+      # Step 5: Build the project.
+      - name: Build
+        run: go build -v ./... # Build the project with verbose output.
+
+      # Step 6: Race detector on Windows needs gcc from the image MinGW.
+      - name: Add MinGW to PATH
+        if: runner.os == 'Windows'
+        run: echo "C:\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Step 7: Run tests with the race detector.
+      - name: Test
+        env:
+          CGO_ENABLED: 1 # Required by the race detector on Windows.
+        run: go test -race -v ./... # Run tests with verbose output and race detector.

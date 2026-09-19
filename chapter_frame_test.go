@@ -1,30 +1,13 @@
 package id3v2
 
 import (
-	"io"
-	"os"
 	"testing"
 	"time"
 )
 
-func prepareTestFile(pattern string) (*os.File, error) {
-	src, err := os.Open(mp3Path)
-	if err != nil {
-		return nil, err
-	}
-	defer src.Close()
-
-	tmpFile, err := os.CreateTemp("", pattern)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = io.Copy(tmpFile, src)
-	if err != nil {
-		return nil, err
-	}
-
-	return tmpFile, nil
+func prepareTestFile(t testing.TB) string {
+	t.Helper()
+	return copyFixture(t)
 }
 
 func TestAddChapterFrame(t *testing.T) {
@@ -111,13 +94,9 @@ func TestAddChapterFrame(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpFile, err := prepareTestFile("chapter_test")
-			if err != nil {
-				t.Error(err)
-			}
-			defer os.Remove(tmpFile.Name())
+			path := prepareTestFile(t)
 
-			tag, err := Open(tmpFile.Name(), Options{Parse: true})
+			tag, err := Open(path, Options{Parse: true})
 			if tag == nil || err != nil {
 				t.Fatal("Error while opening mp3 file: ", err)
 			}
@@ -134,15 +113,20 @@ func TestAddChapterFrame(t *testing.T) {
 			tag.AddChapterFrame(cf)
 
 			if err = tag.Save(); err != nil {
-				t.Error(err)
+				_ = tag.Close()
+
+				t.Fatal(err)
 			}
 
-			tag.Close()
+			if err = tag.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-			tag, err = Open(tmpFile.Name(), Options{Parse: true})
+			tag, err = Open(path, Options{Parse: true})
 			if tag == nil || err != nil {
 				t.Fatal("Error while opening mp3 file: ", err)
 			}
+			defer tag.Close()
 
 			frame, _ := tag.GetLastFrame("CHAP").(ChapterFrame)
 			if frame.ElementID != tt.fields.ElementID {

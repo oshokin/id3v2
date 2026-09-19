@@ -2,7 +2,6 @@ package id3v2
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
@@ -35,27 +34,35 @@ func TestParseLRCFile(t *testing.T) {
 	if result.Metadata[LRCTagArtist] != "Artist Name" {
 		t.Errorf("Expected artist metadata 'Artist Name', got '%s'", result.Metadata["ar"])
 	}
+
 	if result.Metadata[LRCTagAlbum] != "Album Name" {
 		t.Errorf("Expected album metadata 'Album Name', got '%s'", result.Metadata["al"])
 	}
+
 	if result.Metadata[LRCTagTitle] != "Title" {
 		t.Errorf("Expected title metadata 'Title', got '%s'", result.Metadata["ti"])
 	}
+
 	if result.Metadata[LRCTagAuthor] != "Funny Guy" {
 		t.Errorf("Expected author metadata 'Funny Guy', got '%s'", result.Metadata["au"])
 	}
+
 	if result.Metadata[LRCTagLyricist] != "Joke Master" {
 		t.Errorf("Expected lyricist metadata 'Joke Master', got '%s'", result.Metadata["lr"])
 	}
+
 	if result.Metadata[LRCTagLength] != "03:30" {
 		t.Errorf("Expected length metadata '03:30', got '%s'", result.Metadata["length"])
 	}
+
 	if result.Metadata[LRCTagBy] != "Lyrics Guru" {
 		t.Errorf("Expected LRC author metadata 'Lyrics Guru', got '%s'", result.Metadata["by"])
 	}
+
 	if result.Metadata[LRCTagTool] != "Go LRC Parser" {
 		t.Errorf("Expected tool metadata 'Go LRC Parser', got '%s'", result.Metadata["tool"])
 	}
+
 	if result.Metadata[LRCTagVersion] != "1.0" {
 		t.Errorf("Expected version metadata '1.0', got '%s'", result.Metadata["ve"])
 	}
@@ -100,12 +107,14 @@ func TestSynchronisedLyricsFrameWriteTo(t *testing.T) {
 	}
 
 	buf := new(bytes.Buffer)
+
 	_, err := sylf.WriteTo(buf)
 	if err != nil {
 		t.Fatalf("Error writing SynchronisedLyricsFrame: %v", err)
 	}
 
 	br := newBufferedReader(buf)
+
 	parsedFrame, err := parseSynchronisedLyricsFrame(br, 4)
 	if err != nil {
 		t.Fatalf("Error parsing SynchronisedLyricsFrame: %v", err)
@@ -137,7 +146,11 @@ func TestSynchronisedLyricsFrameWriteTo(t *testing.T) {
 	}
 
 	if len(parsedSylf.SynchronizedTexts) != len(sylf.SynchronizedTexts) {
-		t.Fatalf("Expected %d synchronized texts, got %d", len(sylf.SynchronizedTexts), len(parsedSylf.SynchronizedTexts))
+		t.Fatalf(
+			"Expected %d synchronized texts, got %d",
+			len(sylf.SynchronizedTexts),
+			len(parsedSylf.SynchronizedTexts),
+		)
 	}
 
 	for i, expected := range sylf.SynchronizedTexts {
@@ -225,13 +238,9 @@ func TestAddSynchronisedLyricsFrame(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpFile, err := prepareTestFile("sylt_test")
-			if err != nil {
-				t.Error(err)
-			}
-			defer os.Remove(tmpFile.Name())
+			path := prepareTestFile(t)
 
-			tag, err := Open(tmpFile.Name(), Options{Parse: true})
+			tag, err := Open(path, Options{Parse: true})
 			if tag == nil || err != nil {
 				t.Fatal("Error while opening mp3 file: ", err)
 			}
@@ -252,7 +261,7 @@ func TestAddSynchronisedLyricsFrame(t *testing.T) {
 
 			tag.Close()
 
-			tag, err = Open(tmpFile.Name(), Options{Parse: true})
+			tag, err = Open(path, Options{Parse: true})
 			if tag == nil || err != nil {
 				t.Fatal("Error while opening mp3 file: ", err)
 			}
@@ -285,11 +294,19 @@ func TestAddSynchronisedLyricsFrame(t *testing.T) {
 			}
 
 			if parsedSylf.ContentDescriptor != tt.fields.ContentDescriptor {
-				t.Errorf("Expected content descriptor %v, got %v", tt.fields.ContentDescriptor, parsedSylf.ContentDescriptor)
+				t.Errorf(
+					"Expected content descriptor %v, got %v",
+					tt.fields.ContentDescriptor,
+					parsedSylf.ContentDescriptor,
+				)
 			}
 
 			if len(parsedSylf.SynchronizedTexts) != len(tt.fields.SynchronizedTexts) {
-				t.Errorf("Expected %d synchronized texts, got %d", len(tt.fields.SynchronizedTexts), len(parsedSylf.SynchronizedTexts))
+				t.Errorf(
+					"Expected %d synchronized texts, got %d",
+					len(tt.fields.SynchronizedTexts),
+					len(parsedSylf.SynchronizedTexts),
+				)
 			}
 
 			for i, expectedText := range tt.fields.SynchronizedTexts {
@@ -298,7 +315,11 @@ func TestAddSynchronisedLyricsFrame(t *testing.T) {
 				}
 
 				if parsedSylf.SynchronizedTexts[i].Timestamp != expectedText.Timestamp {
-					t.Errorf("Expected timestamp %v, got %v", expectedText.Timestamp, parsedSylf.SynchronizedTexts[i].Timestamp)
+					t.Errorf(
+						"Expected timestamp %v, got %v",
+						expectedText.Timestamp,
+						parsedSylf.SynchronizedTexts[i].Timestamp,
+					)
 				}
 			}
 		})

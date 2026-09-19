@@ -52,9 +52,7 @@ func (bw *bufferedWriter) Reset(w io.Writer) {
 
 // WriteByte writes a single byte to the underlying writer.
 // If an error occurs, it is stored in the bufferedWriter's err field.
-//
-//nolint:govet // This method does not implement io.ByteWriter.
-func (bw *bufferedWriter) WriteByte(c byte) {
+func (bw *bufferedWriter) writeByte(c byte) {
 	if bw.err != nil {
 		return // Skip if an error has already occurred.
 	}
@@ -84,6 +82,7 @@ func (bw *bufferedWriter) WriteString(s string) {
 	}
 
 	var n int
+
 	n, bw.err = bw.w.WriteString(s) // Write the string.
 	bw.written += n                 // Increment the byte counter.
 }

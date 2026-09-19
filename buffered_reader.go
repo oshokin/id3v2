@@ -69,14 +69,13 @@ func (br *bufferedReader) ReadAll() []byte {
 
 // ReadByte reads and returns a single byte from the buffer.
 // If an error has already occurred, it returns 0.
-//
-//nolint:govet // This method does not implement io.ByteReader.
-func (br *bufferedReader) ReadByte() byte {
+func (br *bufferedReader) readByte() byte {
 	if br.err != nil {
 		return 0
 	}
 
 	var b byte
+
 	b, br.err = br.buf.ReadByte() // Read the byte and store any error.
 
 	return b
@@ -91,6 +90,7 @@ func (br *bufferedReader) Next(n int) []byte {
 	}
 
 	var b []byte
+
 	b, br.err = br.next(n) // Delegate to the internal next method.
 
 	return b
@@ -187,25 +187,53 @@ func (br *bufferedReader) ReadText(encoding Encoding) []byte {
 		return nil
 	}
 
-	var (
-		text       []byte
-		delimiters = encoding.TerminationBytes
-	)
+	if encoding.Equals(EncodingUTF16) || encoding.Equals(EncodingUTF16BE) {
+		var text []byte
 
-	// Read until the termination bytes are found.
-	text, br.err = br.readTillDelimiters(delimiters)
+		text, br.err = br.readTillUTF16Terminator()
+		if br.err != nil {
+			return text
+		}
 
-	// Handle UTF-16 encoding edge case: if the text doesn't start with a BOM,
-	// append the first byte to ensure proper decoding.
-	if encoding.Equals(EncodingUTF16) &&
-		!bytes.Equal(text, bom) {
-		text = append(text, br.ReadByte())
+		br.Discard(len(encoding.TerminationBytes))
+
+		return text
 	}
 
-	// Discard the termination bytes.
-	br.Discard(len(delimiters))
+	text, err := br.readTillDelimiters(encoding.TerminationBytes)
+	br.err = err
+	br.Discard(len(encoding.TerminationBytes))
 
 	return text
+}
+
+// readTillUTF16Terminator reads UTF-16 code units until a U+0000 terminator.
+// It does not consume the terminator. Scanning two bytes at a time avoids a
+// false match on the trailing 0x00 of a little-endian BMP character.
+func (br *bufferedReader) readTillUTF16Terminator() ([]byte, error) {
+	var result []byte
+
+	for {
+		peeked, err := br.buf.Peek(2)
+		if err != nil {
+			return result, err
+		}
+
+		if len(peeked) < 2 {
+			return result, io.ErrUnexpectedEOF
+		}
+
+		if peeked[0] == 0 && peeked[1] == 0 {
+			return result, nil
+		}
+
+		var unit [2]byte
+		if _, err := io.ReadFull(br.buf, unit[:]); err != nil {
+			return result, err
+		}
+
+		result = append(result, unit[:]...)
+	}
 }
 
 // Reset resets the bufferedReader to read from a new io.Reader.

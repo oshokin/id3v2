@@ -43,14 +43,14 @@ func (pf PictureFrame) Size() int {
 func (pf PictureFrame) WriteTo(w io.Writer) (n int64, err error) {
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(pf.Encoding.Key)
+		bw.writeByte(pf.Encoding.Key)
 
 		// Write the MIME type and a null terminator.
 		bw.WriteString(pf.MimeType)
-		bw.WriteByte(0)
+		bw.writeByte(0)
 
 		// Write the picture type byte.
-		bw.WriteByte(pf.PictureType)
+		bw.writeByte(pf.PictureType)
 
 		// Write the encoded description.
 		bw.EncodeAndWriteText(pf.Description, pf.Encoding)
@@ -76,13 +76,13 @@ func (pf PictureFrame) WriteTo(w io.Writer) (n int64, err error) {
 // This function is used when reading an MP3 file and decoding its ID3v2 tag.
 func parsePictureFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the encoding byte and determine the text encoding.
-	encoding := getEncoding(br.ReadByte())
+	encoding := getEncoding(br.readByte())
 
 	// Read the MIME type as ISO-8859-1 encoded text.
 	mimeType := br.ReadText(EncodingISO)
 
 	// Read the picture type byte.
-	pictureType := br.ReadByte()
+	pictureType := br.readByte()
 
 	// Read the description using the specified encoding.
 	description := br.ReadText(encoding)

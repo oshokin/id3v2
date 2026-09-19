@@ -1,6 +1,7 @@
 package id3v2
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,14 +38,21 @@ const (
 // The `opts` parameter controls parsing behavior, such as whether to parse all frames or specific ones.
 // Returns a pointer to the Tag and an error if the file cannot be opened or parsed.
 func Open(name string, opts Options) (*Tag, error) {
-	// Open the file and clean the path to prevent directory traversal issues.
 	file, err := os.Open(filepath.Clean(name))
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse the file's content using ParseReader.
-	return ParseReader(file, opts)
+	// Parse the file's content using ParseReader. Close the file if parsing fails
+	// so callers do not leak the descriptor.
+	tag, parseErr := ParseReader(file, opts)
+	if parseErr == nil {
+		return tag, nil
+	}
+
+	closeErr := file.Close()
+
+	return tag, errors.Join(parseErr, closeErr)
 }
 
 // ParseReader reads from the provided `io.Reader` and parses the ID3v2 tag.

@@ -44,16 +44,21 @@ func (pf PopularimeterFrame) Size() int {
 // The ID3v2 specification requires the counter to be at least 4 bytes long.
 // If the counter is smaller than 4 bytes, it is padded with leading zeros.
 func (pf PopularimeterFrame) counterBytes() []byte {
-	bytes := pf.Counter.Bytes() // Get the byte representation of the counter.
-
-	// If the counter is less than 4 bytes, pad it with leading zeros.
-	bytesNeeded := 4 - len(bytes)
-	if bytesNeeded > 0 {
-		padding := make([]byte, bytesNeeded)
-		bytes = append(padding, bytes...)
+	if pf.Counter == nil {
+		return []byte{0, 0, 0, 0}
 	}
 
-	return bytes
+	counter := pf.Counter.Bytes() // Get the byte representation of the counter.
+
+	// If the counter is less than 4 bytes, pad it with leading zeros.
+	if len(counter) >= 4 {
+		return counter
+	}
+
+	result := make([]byte, 4)
+	copy(result[4-len(counter):], counter)
+
+	return result
 }
 
 // WriteTo writes the PopularimeterFrame to the provided io.Writer.
@@ -62,10 +67,10 @@ func (pf PopularimeterFrame) WriteTo(w io.Writer) (n int64, err error) {
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the Email field, followed by a null terminator (0).
 		bw.WriteString(pf.Email)
-		bw.WriteByte(0)
+		bw.writeByte(0)
 
 		// Write the Rating field.
-		bw.WriteByte(pf.Rating)
+		bw.writeByte(pf.Rating)
 
 		// Write the Counter field as a 4-byte value.
 		_, err = bw.Write(pf.counterBytes())
@@ -79,14 +84,12 @@ func (pf PopularimeterFrame) WriteTo(w io.Writer) (n int64, err error) {
 
 // parsePopularimeterFrame parses a PopularimeterFrame from a bufferedReader.
 // It reads the Email, Rating, and Counter fields from the reader and constructs a PopularimeterFrame.
-//
-//nolint:unparam // Error is intentionally nil to satisfy the framers map function contract.
 func parsePopularimeterFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the Email field as ISO-8859-1 encoded text.
 	email := br.ReadText(EncodingISO)
 
 	// Read the Rating field as a single byte.
-	rating := br.ReadByte()
+	rating := br.readByte()
 
 	// Read the remaining bytes as the Counter field.
 	remainingBytes := br.ReadAll()

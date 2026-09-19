@@ -2,6 +2,35 @@ package id3v2
 
 import "testing"
 
+func TestPutSequenceClearsFrameReferences(t *testing.T) {
+	t.Parallel()
+
+	s := getSequence()
+
+	s.AddFrame(benchSeqFrameA)
+	s.AddFrame(benchSeqFrameB)
+
+	putSequence(s)
+
+	if len(s.frames) != 0 {
+		t.Fatalf("len = %d, want 0", len(s.frames))
+	}
+
+	full := s.frames[:cap(s.frames)]
+	for i, frame := range full {
+		if frame != nil {
+			t.Fatalf("frame[%d] = %#v, want nil", i, frame)
+		}
+	}
+
+	reused := getSequence()
+	defer putSequence(reused)
+
+	if len(reused.frames) != 0 {
+		t.Fatalf("reused len = %d, want 0", len(reused.frames))
+	}
+}
+
 func TestSequenceCommentFramesUniqueness(t *testing.T) {
 	t.Parallel()
 

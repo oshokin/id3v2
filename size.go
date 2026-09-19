@@ -69,7 +69,7 @@ func writeSynchSafeBytesSize(bw *bufferedWriter, size uint) error {
 		// Convert the shifted bits to a byte.
 		bSize := byte(firstBits)
 		// Write the byte to the bufferedWriter.
-		bw.WriteByte(bSize)
+		bw.writeByte(bSize)
 		// Shift the size left by 7 bits to process the next 7 bits in the next iteration.
 		size <<= synchSafeSizeBase
 	}
@@ -91,7 +91,7 @@ func writeSynchUnsafeBytesSize(bw *bufferedWriter, size uint) error {
 		// Shift the extracted bits to the least significant byte position.
 		firstBits >>= (3 * 8)
 		// Convert the bits to a byte and write it to the bufferedWriter.
-		bw.WriteByte(byte(firstBits))
+		bw.writeByte(byte(firstBits))
 		// Shift the size left by 8 bits to process the next 8 bits.
 		size <<= synchUnsafeSizeBase
 	}

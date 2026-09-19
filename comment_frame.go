@@ -44,7 +44,7 @@ func (cf CommentFrame) WriteTo(w io.Writer) (n int64, err error) {
 	// Use a buffered writer for efficient writing.
 	return useBufferedWriter(w, func(bw *bufferedWriter) error {
 		// Write the encoding byte.
-		bw.WriteByte(cf.Encoding.Key)
+		bw.writeByte(cf.Encoding.Key)
 
 		// Write the language code.
 		bw.WriteString(cf.Language)
@@ -68,7 +68,7 @@ func (cf CommentFrame) WriteTo(w io.Writer) (n int64, err error) {
 // parseCommentFrame reads a comment frame from a buffered reader and returns a CommentFrame struct.
 func parseCommentFrame(br *bufferedReader, _ byte) (Framer, error) {
 	// Read the encoding byte and determine the text encoding.
-	encoding := getEncoding(br.ReadByte())
+	encoding := getEncoding(br.readByte())
 
 	// Read the next 3 bytes as the language code.
 	language := br.Next(3)
